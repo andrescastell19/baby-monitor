@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Baby Monitor - Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">👶</span>
+        <h1>Baby Monitor</h1>
+      </div>
+      <div class="status" id="connectionStatus">
+        <span class="status-dot disconnected"></span>
+        <span class="status-text">Desconectado</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="video-section">
+        <div class="video-container" id="videoContainer">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-overlay" id="videoOverlay">
+            <div class="waiting">
+              <span class="waiting-icon">📷</span>
+              <p>Esperando cámara...</p>
+              <p class="subtext" id="waitingSubtext">Esperando que la cámara se conecte...</p>
+            </div>
+          </div>
+        </div>
+        <div class="video-info" id="videoInfo">
+          <span id="streamStatus">Sin transmisión</span>
+          <span id="streamResolution"></span>
+        </div>
+      </section>
+
+      <section class="controls-section">
+        <button class="control-btn" id="btnMute" title="Silenciar audio">
+          <span class="btn-icon">🔊</span>
+          <span class="btn-label">Sonido</span>
+        </button>
+        <button class="control-btn" id="btnScreenshot" title="Capturar pantalla">
+          <span class="btn-icon">📸</span>
+          <span class="btn-label">Screenshot</span>
+        </button>
+        <button class="control-btn" id="btnFullscreen" title="Pantalla completa">
+          <span class="btn-icon">⛶</span>
+          <span class="btn-label">Fullscreen</span>
+        </button>
+      </section>
+
+      <section class="alerts-section">
+        <h2>Alertas (<span id="alertCount">0</span>)</h2>
+        <div class="alerts-list" id="alertsList">
+          <div class="no-alerts">No hay alertas</div>
+        </div>
+      </section>
+    </main>
+
+    <div class="pairing-section hidden" id="pairingSection">
+      <div class="pairing-card">
+        <h2>Conectar a cámara</h2>
+        <p>La cámara se conectará automáticamente</p>
+        <button class="connect-btn" id="btnConnect">Conectar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,25 +1,66 @@
 {
   "expo": {
-    "name": "BABY-MONITOR",
-    "slug": "BABY-MONITOR",
+    "name": "Baby Monitor",
+    "slug": "baby-monitor",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
-    },
+    "userInterfaceStyle": "dark",
+    "scheme": "babymonitor",
     "android": {
+      "package": "com.babymonitor.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#1a1a2e"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "WAKE_LOCK",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Esta app necesita acceso a la cámara para monitorear a tu bebé",
+          "microphonePermission": "Esta app necesita acceso al micrófono para detectar sonidos"
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Esta app necesita acceso al micrófono para detectar sonidos"
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Esta app necesita acceso a la cámara para monitorear a tu bebé",
+          "microphonePermission": "Esta app necesita acceso al micrófono para detectar sonidos"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7840efbf-5cc3-4d7d-a86c-fbe972c00fa7"
+      }
     }
   }
 }
