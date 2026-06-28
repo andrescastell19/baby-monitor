@@ -9,23 +9,28 @@ export function useWebRTC() {
   const [remoteStream, setRemoteStream] = useState<any>(null);
   const [localStream, setLocalStream] = useState<any>(null);
   const [connectionState, setConnectionState] = useState<string>('new');
+  const [signalingStatus, setSignalingStatus] = useState<string>('disconnected');
   const { setStatus, setError, localDevice, remoteDevice } = useConnectionStore();
   const signalingConnected = useRef(false);
 
   const handleSignalingMessage = useCallback((message: SignalingMessage) => {
+    console.log('Signaling message received:', message.type);
     switch (message.type) {
       case 'offer':
         if (message.payload?.sdp) {
+          console.log('Handling WebRTC offer from:', message.deviceId);
           webrtcService.handleOffer(message.payload.sdp);
         }
         break;
       case 'answer':
         if (message.payload?.sdp) {
+          console.log('Handling WebRTC answer from:', message.deviceId);
           webrtcService.handleAnswer(message.payload.sdp);
         }
         break;
       case 'candidate':
         if (message.payload?.candidate) {
+          console.log('Handling ICE candidate from:', message.deviceId);
           webrtcService.handleCandidate(message.payload.candidate);
         }
         break;
@@ -33,6 +38,8 @@ export function useWebRTC() {
   }, []);
 
   const handleStatus = useCallback((status: 'connected' | 'disconnected' | 'error') => {
+    console.log('Signaling status:', status);
+    setSignalingStatus(status);
     if (status === 'connected') {
       setStatus('connecting');
     } else if (status === 'error') {
@@ -45,6 +52,7 @@ export function useWebRTC() {
     signalingConnected.current = true;
 
     console.log('Connecting to signaling with device:', localDevice.id, 'role:', localDevice.role);
+    setSignalingStatus('connecting');
     signalingService.connect(localDevice.id, localDevice.role, handleSignalingMessage, handleStatus);
 
     return () => {
@@ -124,6 +132,7 @@ export function useWebRTC() {
     remoteStream,
     localStream,
     connectionState,
+    signalingStatus,
     initializeAsCamera,
     initializeAsMonitor,
     muteAudio,
