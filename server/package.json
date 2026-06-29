@@ -1,0 +1,15 @@
+{
+  "name": "baby-monitor-signaling-server",
+  "version": "1.0.0",
+  "description": "WebSocket signaling server for Baby Monitor",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

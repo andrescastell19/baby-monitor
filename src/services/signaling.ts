@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { SignalingMessage } from '../types';
 
 const SERVER_URL = Platform.select({
-  android: 'ws://192.168.1.138:8888',
+  android: 'wss://baby-monitor-signaling.onrender.com',
   default: 'ws://localhost:8888'
 });
 
@@ -16,7 +16,7 @@ class SignalingService {
   private onMessage: MessageHandler | null = null;
   private onStatus: StatusHandler | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = Infinity;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
   connect(deviceId: string, role: string, onMessage: MessageHandler, onStatus: StatusHandler) {
@@ -69,7 +69,7 @@ class SignalingService {
   private attemptReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+      const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
       console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
       this.reconnectTimeout = setTimeout(() => {

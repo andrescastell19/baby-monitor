@@ -13,27 +13,31 @@ export function useWebRTC() {
   const { setStatus, setError, localDevice, remoteDevice } = useConnectionStore();
   const signalingConnected = useRef(false);
 
-  const handleSignalingMessage = useCallback((message: SignalingMessage) => {
+  const handleSignalingMessage = useCallback(async (message: SignalingMessage) => {
     console.log('Signaling message received:', message.type);
-    switch (message.type) {
-      case 'offer':
-        if (message.payload?.sdp) {
-          console.log('Handling WebRTC offer from:', message.deviceId);
-          webrtcService.handleOffer(message.payload.sdp);
-        }
-        break;
-      case 'answer':
-        if (message.payload?.sdp) {
-          console.log('Handling WebRTC answer from:', message.deviceId);
-          webrtcService.handleAnswer(message.payload.sdp);
-        }
-        break;
-      case 'candidate':
-        if (message.payload?.candidate) {
-          console.log('Handling ICE candidate from:', message.deviceId);
-          webrtcService.handleCandidate(message.payload.candidate);
-        }
-        break;
+    try {
+      switch (message.type) {
+        case 'offer':
+          if (message.payload?.sdp) {
+            console.log('Handling WebRTC offer from:', message.deviceId);
+            await webrtcService.handleOffer(message.payload.sdp);
+          }
+          break;
+        case 'answer':
+          if (message.payload?.sdp) {
+            console.log('Handling WebRTC answer from:', message.deviceId);
+            await webrtcService.handleAnswer(message.payload.sdp);
+          }
+          break;
+        case 'candidate':
+          if (message.payload?.candidate) {
+            console.log('Handling ICE candidate from:', message.deviceId);
+            await webrtcService.handleCandidate(message.payload.candidate);
+          }
+          break;
+      }
+    } catch (err) {
+      console.error('Error handling signaling message:', message.type, err);
     }
   }, []);
 

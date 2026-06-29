@@ -1,4 +1,5 @@
-const SIGNALING_SERVER = `ws://${window.location.hostname}:8888`;
+const SIGNALING_PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const SIGNALING_SERVER = `${SIGNALING_PROTOCOL}//${window.location.host}`;
 const DEVICE_ID = `web-monitor-${Date.now()}`;
 let CAMERA_DEVICE_ID = null;
 
@@ -8,12 +9,15 @@ let remoteStream = null;
 let isMuted = false;
 let alerts = [];
 let signalingConnected = false;
+let pendingCandidates = [];
+let remoteDescriptionSet = false;
 
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ]
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
 };
 
 const remoteVideo = document.getElementById('remoteVideo');
@@ -38,7 +42,6 @@ function setStatus(state, text) {
 
 function connectSignaling() {
   setStatus('connecting', 'Conectando...');
-
   ws = new WebSocket(SIGNALING_SERVER);
 
   ws.onopen = () => {
@@ -80,9 +83,12 @@ function register() {
 
 function createPeerConnection() {
   pc = new RTCPeerConnection(iceServers);
+  remoteDescriptionSet = false;
+  pendingCandidates = [];
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
+      console.log('Sending ICE candidate:', event.candidate.candidate?.substring(0, 60));
       sendSignaling({
         type: 'candidate',
         deviceId: DEVICE_ID,
@@ -92,26 +98,18 @@ function createPeerConnection() {
           candidate: event.candidate
         }
       });
+    } else {
+      console.log('ICE gathering complete');
     }
   };
 
   pc.ontrack = (event) => {
-    console.log('Remote track received:', event.track.kind);
+    console.log('Remote track received:', event.track.kind, event.track.id);
     remoteStream = event.streams[0];
-    remoteVideo.srcObject = remoteStream;
-    videoOverlay.classList.add('hidden');
-    streamStatus.textContent = 'Recibiendo transmisión';
 
-    remoteStream.getVideoTracks().forEach(track => {
-      const settings = track.getSettings();
-      if (settings.width && settings.height) {
-        streamResolution.textContent = `${settings.width}x${settings.height}`;
-      }
-    });
-
-    remoteStream.getAudioTracks().forEach(track => {
-      track.enabled = !isMuted;
-    });
+    if (remoteVideo.srcObject !== remoteStream) {
+      remoteVideo.srcObject = remoteStream;
+    }
   };
 
   pc.onconnectionstatechange = () => {
@@ -119,6 +117,8 @@ function createPeerConnection() {
     switch (pc.connectionState) {
       case 'connected':
         streamStatus.textContent = 'Conectado';
+        videoOverlay.classList.add('hidden');
+        remoteVideo.play().catch(() => {});
         break;
       case 'disconnected':
         streamStatus.textContent = 'Desconectado';
@@ -131,6 +131,11 @@ function createPeerConnection() {
 
   pc.oniceconnectionstatechange = () => {
     console.log('ICE connection state:', pc.iceConnectionState);
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      videoOverlay.classList.add('hidden');
+      streamStatus.textContent = 'Recibiendo transmisión';
+      remoteVideo.play().catch(() => {});
+    }
   };
 }
 
@@ -167,14 +172,20 @@ function handleSignalingMessage(message) {
       break;
 
     case 'answer':
-      if (message.payload?.sdp && pc) {
+      if (message.payload?.sdp && pc && remoteDescriptionSet) {
         pc.setRemoteDescription(new RTCSessionDescription(message.payload.sdp));
       }
       break;
 
     case 'candidate':
-      if (message.payload?.candidate && pc) {
-        pc.addIceCandidate(new RTCIceCandidate(message.payload.candidate));
+      if (message.payload?.candidate) {
+        if (pc && remoteDescriptionSet) {
+          console.log('Adding ICE candidate directly');
+          pc.addIceCandidate(new RTCIceCandidate(message.payload.candidate));
+        } else {
+          console.log('Queuing ICE candidate (remoteDescription not set yet)');
+          pendingCandidates.push(message.payload.candidate);
+        }
       }
       break;
 
@@ -189,12 +200,31 @@ async function handleOffer(message) {
     CAMERA_DEVICE_ID = message.deviceId;
   }
 
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  pendingCandidates = [];
+  remoteDescriptionSet = false;
+
   createPeerConnection();
 
   try {
+    console.log('Setting remote description...');
     await pc.setRemoteDescription(new RTCSessionDescription(message.payload.sdp));
+    remoteDescriptionSet = true;
+    console.log('Remote description set, now flushing', pendingCandidates.length, 'queued candidates');
+
+    for (const candidate of pendingCandidates) {
+      console.log('Flushing queued candidate');
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+    pendingCandidates = [];
+
+    console.log('Creating answer...');
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    console.log('Answer created, sending to camera:', message.deviceId);
 
     sendSignaling({
       type: 'answer',
@@ -205,6 +235,7 @@ async function handleOffer(message) {
         sdp: answer
       }
     });
+    console.log('Answer sent');
   } catch (err) {
     console.error('Error handling offer:', err);
   }
@@ -218,7 +249,6 @@ function addAlert(alertData) {
     timestamp: Date.now(),
     read: false
   };
-
   alerts.unshift(alert);
   renderAlerts();
 }
@@ -268,18 +298,15 @@ function toggleMute() {
 
 function takeScreenshot() {
   if (!remoteStream) return;
-
   const canvas = document.createElement('canvas');
   const video = document.createElement('video');
   video.srcObject = remoteStream;
   video.play();
-
   video.onloadedmetadata = () => {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
-
     const link = document.createElement('a');
     link.download = `baby-monitor-${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');

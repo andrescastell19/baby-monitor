@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 8888;
+const PORT = process.env.PORT || 8888;
 const WEB_DIR = path.join(__dirname, '..', 'web');
 
 const MIME_TYPES = {
@@ -15,97 +15,49 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-const server = http.createServer((req, res) => {
-  let filePath = path.join(WEB_DIR, req.url === '/' ? 'index.html' : req.url);
-
-  if (!fs.existsSync(filePath)) {
-    res.writeHead(404);
-    res.end('Not found');
+function handleRequest(req, res) {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
     return;
   }
 
+  let filePath = path.join(WEB_DIR, req.url === '/' ? 'index.html' : req.url);
+  if (!fs.existsSync(filePath)) { res.writeHead(404); res.end('Not found'); return; }
   const ext = path.extname(filePath);
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
   fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(500);
-      res.end('Server error');
-      return;
-    }
+    if (err) { res.writeHead(500); res.end('Server error'); return; }
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);
   });
-});
+}
 
-const wss = new WebSocketServer({ server });
+const server = http.createServer(handleRequest);
 
 const devices = new Map();
 
-function broadcastToMonitors(message) {
-  for (const [id, device] of devices) {
-    if (device.role === 'monitor') {
-      try {
-        device.ws.send(JSON.stringify(message));
-      } catch (e) {
-        console.log('Error sending to monitor:', id);
-      }
-    }
-  }
-}
-
-function broadcastToCameras(message) {
-  for (const [id, device] of devices) {
-    if (device.role === 'camera') {
-      try {
-        device.ws.send(JSON.stringify(message));
-      } catch (e) {
-        console.log('Error sending to camera:', id);
-      }
-    }
-  }
-}
-
-function listDevices() {
-  const list = [];
-  for (const [id, device] of devices) {
-    list.push({ id, role: device.role });
-  }
-  return list;
-}
-
-console.log(`Baby Monitor server running on http://localhost:${PORT}`);
-console.log(`Web dashboard: http://localhost:${PORT}`);
-console.log(`Signaling WebSocket: ws://localhost:${PORT}`);
-
-wss.on('connection', (ws) => {
+function handleWsConnection(ws) {
   console.log('New client connected');
 
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
-      console.log('Received:', message.type, 'from', message.deviceId);
 
       switch (message.type) {
         case 'register': {
           devices.set(message.deviceId, { ws, role: message.role });
           console.log(`Device registered: ${message.deviceId} (${message.role})`);
-          console.log('All devices:', listDevices());
+          console.log('All devices:', Array.from(devices.entries()).map(([id, d]) => ({ id, role: d.role })));
 
           if (message.role === 'camera') {
-            broadcastToMonitors({
-              type: 'camera-online',
-              deviceId: message.deviceId,
-            });
+            broadcastToMonitors({ type: 'camera-online', deviceId: message.deviceId });
           }
 
           if (message.role === 'monitor') {
             for (const [id, device] of devices) {
               if (device.role === 'camera') {
-                ws.send(JSON.stringify({
-                  type: 'camera-online',
-                  deviceId: id,
-                }));
+                ws.send(JSON.stringify({ type: 'camera-online', deviceId: id }));
               }
             }
           }
@@ -117,11 +69,18 @@ wss.on('connection', (ws) => {
         case 'candidate': {
           let target = devices.get(message.targetDeviceId);
           if (!target) {
-            const neededRole = message.type === 'offer' ? 'monitor' : 'camera';
+            let neededRole;
+            if (message.type === 'offer') {
+              neededRole = 'monitor';
+            } else if (message.type === 'answer') {
+              neededRole = 'camera';
+            } else {
+              const sender = devices.get(message.deviceId);
+              neededRole = sender?.role === 'camera' ? 'monitor' : 'camera';
+            }
             for (const [id, device] of devices) {
               if (device.role === neededRole) {
                 target = device;
-                console.log(`Fallback: routing ${message.type} to ${id} (${neededRole})`);
                 break;
               }
             }
@@ -132,44 +91,14 @@ wss.on('connection', (ws) => {
               deviceId: message.deviceId,
               payload: message.payload
             }));
-            console.log(`Forwarded ${message.type} from ${message.deviceId} to ${target ? 'found' : 'not found'}`);
           } else {
-            console.log(`No target found for ${message.type}`);
+            console.log(`No target for ${message.type} from ${message.deviceId}`);
           }
           break;
         }
 
         case 'alert': {
-          broadcastToMonitors({
-            type: 'alert',
-            deviceId: message.deviceId,
-            payload: message.payload
-          });
-          break;
-        }
-
-        case 'list-devices': {
-          ws.send(JSON.stringify({
-            type: 'device-list',
-            devices: listDevices()
-          }));
-          break;
-        }
-
-        case 'disconnect': {
-          const device = devices.get(message.deviceId);
-          if (device) {
-            const role = device.role;
-            devices.delete(message.deviceId);
-            console.log(`Device disconnected: ${message.deviceId}`);
-
-            if (role === 'camera') {
-              broadcastToMonitors({
-                type: 'camera-offline',
-                deviceId: message.deviceId,
-              });
-            }
-          }
+          broadcastToMonitors({ type: 'alert', deviceId: message.deviceId, payload: message.payload });
           break;
         }
       }
@@ -184,17 +113,32 @@ wss.on('connection', (ws) => {
         const role = device.role;
         devices.delete(id);
         console.log(`WebSocket closed: ${id} (${role})`);
-
         if (role === 'camera') {
-          broadcastToMonitors({
-            type: 'camera-offline',
-            deviceId: id,
-          });
+          broadcastToMonitors({ type: 'camera-offline', deviceId: id });
         }
         break;
       }
     }
   });
-});
+}
 
-server.listen(PORT);
+function broadcastToMonitors(message) {
+  for (const [id, device] of devices) {
+    if (device.role === 'monitor') {
+      try { device.ws.send(JSON.stringify(message)); } catch (e) {}
+    }
+  }
+}
+
+const wss = new WebSocketServer({ server });
+wss.on('connection', handleWsConnection);
+
+server.listen(PORT, () => {
+  console.log('');
+  console.log('=== Baby Monitor Signaling Server ===');
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Dashboard: http://localhost:${PORT}`);
+  console.log(`Health:    http://localhost:${PORT}/health`);
+  console.log('=====================================');
+  console.log('');
+});

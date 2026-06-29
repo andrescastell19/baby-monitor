@@ -66,10 +66,14 @@ export default function CameraScreen() {
       addLog('Llamando initializeAsCamera...');
       await initializeAsCamera();
       addLog('initializeAsCamera completado');
+      addLog(`localStream: ${localStream ? 'OK' : 'null'}`);
+      addLog(`connectionState: ${connectionState}`);
     } catch (err: any) {
       const msg = err?.message || String(err);
-      setError(`Error al iniciar cámara: ${msg}`);
-      addLog(`ERROR: ${msg}`);
+      const fullMsg = `Error al iniciar cámara: ${msg}`;
+      setError(fullMsg);
+      addLog(`ERROR: ${fullMsg}`);
+      addLog(`ERROR stack: ${err?.stack || 'N/A'}`);
       console.error('Camera init error:', err);
     } finally {
       setIsConnecting(false);
@@ -131,6 +135,15 @@ export default function CameraScreen() {
           </View>
         ) : null}
 
+        <View style={styles.logBox}>
+          <Text style={styles.logTitle}>Logs:</Text>
+          <ScrollView style={styles.logScroll}>
+            {logs.map((log, i) => (
+              <Text key={i} style={styles.logText}>{log}</Text>
+            ))}
+          </ScrollView>
+        </View>
+
         <View style={styles.footer}>
           <Text style={styles.statusText}>
             {isStreaming ? 'Transmitiendo...' : isConnecting ? 'Conectando...' : connectionState === 'connected' ? 'Conectado' : 'Esperando conexión...'}
@@ -146,15 +159,6 @@ export default function CameraScreen() {
               <Text style={styles.streamButtonText}>Iniciar Transmisión</Text>
             </TouchableOpacity>
           )}
-        </View>
-
-        <View style={styles.logBox}>
-          <Text style={styles.logTitle}>Logs:</Text>
-          <ScrollView style={styles.logScroll}>
-            {logs.map((log, i) => (
-              <Text key={i} style={styles.logText}>{log}</Text>
-            ))}
-          </ScrollView>
         </View>
       </View>
     </View>

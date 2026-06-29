@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, FlatList } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useWebRTC } from '../hooks/useWebRTC';
@@ -7,21 +7,51 @@ import { Alert } from '../types';
 
 export default function MonitorScreen() {
   const { connection, remoteDevice, alerts, markAlertAsRead, localDevice } = useConnectionStore();
-  const { remoteStream, connectionState, initializeAsMonitor, muteAudio, unmuteAudio } = useWebRTC();
+  const { remoteStream, connectionState, initializeAsMonitor, muteAudio, unmuteAudio, signalingStatus } = useWebRTC();
   const [isMuted, setIsMuted] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+
+  const addLog = (msg: string) => {
+    const time = new Date().toLocaleTimeString();
+    setLogs(prev => [...prev.slice(-20), `${time} ${msg}`]);
+  };
+
+  useEffect(() => {
+    addLog(`localDevice: ${localDevice?.id || 'null'} (${localDevice?.role || 'null'})`);
+    addLog(`remoteDevice: ${remoteDevice?.id || 'null'} (${remoteDevice?.role || 'null'})`);
+    addLog(`signaling: ${signalingStatus}`);
+  }, [localDevice, remoteDevice, signalingStatus]);
 
   useEffect(() => {
     if (localDevice && remoteDevice) {
-      initializeAsMonitor();
+      addLog('Inicializando monitor...');
+      initializeAsMonitor().then(() => {
+        addLog('initializeAsMonitor completado');
+      }).catch((err: any) => {
+        addLog(`ERROR init: ${err?.message || String(err)}`);
+      });
     }
   }, [localDevice, remoteDevice]);
 
   useEffect(() => {
+    if (connectionState !== 'new') {
+      addLog(`WebRTC state: ${connectionState}`);
+    }
     if (connectionState === 'connected') {
       setIsConnected(true);
+      addLog('WebRTC CONECTADO');
+    }
+    if (connectionState === 'failed') {
+      addLog('WebRTC FALLIDO');
     }
   }, [connectionState]);
+
+  useEffect(() => {
+    if (remoteStream) {
+      addLog('Remote stream received');
+    }
+  }, [remoteStream]);
 
   const toggleMute = () => {
     if (isMuted) {
@@ -61,13 +91,22 @@ export default function MonitorScreen() {
         ) : (
           <View style={styles.videoPlaceholder}>
             <Text style={styles.videoText}>
-              {connection.status === 'connected' ? 'Conectado' : 'Esperando cámara...'}
+              {connectionState === 'connected' ? 'Conectado' : 'Esperando cámara...'}
             </Text>
             {remoteDevice && (
               <Text style={styles.deviceText}>{remoteDevice.name}</Text>
             )}
           </View>
         )}
+      </View>
+
+      <View style={styles.logBox}>
+        <Text style={styles.logTitle}>Logs:</Text>
+        <ScrollView style={styles.logScroll}>
+          {logs.map((log, i) => (
+            <Text key={i} style={styles.logText}>{log}</Text>
+          ))}
+        </ScrollView>
       </View>
 
       <View style={styles.controls}>
@@ -78,14 +117,6 @@ export default function MonitorScreen() {
           <Text style={styles.controlButtonText}>
             {isMuted ? '🔇 Muted' : '🔊 Sound'}
           </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton}>
-          <Text style={styles.controlButtonText}>📸 Screenshot</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton}>
-          <Text style={styles.controlButtonText}>⚙️ Settings</Text>
         </TouchableOpacity>
       </View>
 
@@ -139,11 +170,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 10,
   },
+  logBox: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    marginHorizontal: 10,
+    padding: 8,
+    borderRadius: 10,
+    maxHeight: 120,
+  },
+  logTitle: {
+    color: '#888',
+    fontSize: 10,
+    marginBottom: 4,
+  },
+  logScroll: {
+    flex: 1,
+  },
+  logText: {
+    color: '#0F0',
+    fontSize: 9,
+    fontFamily: 'monospace',
+    marginBottom: 1,
+  },
   controls: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 20,
-    paddingVertical: 15,
+    paddingVertical: 10,
   },
   controlButton: {
     paddingVertical: 12,
