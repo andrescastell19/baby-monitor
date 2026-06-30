@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeModules } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
+import * as KeepAwake from 'expo-keep-awake';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useConnectionStore } from '../stores/connectionStore';
 import { detectionService } from '../services/detection';
@@ -36,6 +37,11 @@ export default function CameraScreen() {
       setIsStreaming(true);
       setIsConnecting(false);
       addLog('WebRTC CONECTADO');
+      KeepAwake.activateKeepAwakeAsync().then(() => addLog('KeepAwake activado'));
+      if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
+        NativeModules.BabyMonitor.startService();
+        addLog('Foreground service iniciado');
+      }
     } else if (connectionState === 'failed') {
       setIsStreaming(false);
       addLog('WebRTC FALLIDO - intentando reconectar...');
@@ -47,6 +53,16 @@ export default function CameraScreen() {
       addLog(`WebRTC state: ${connectionState}`);
     }
   }, [connectionState]);
+
+  useEffect(() => {
+    return () => {
+      KeepAwake.deactivateKeepAwake();
+      if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
+        NativeModules.BabyMonitor.stopService();
+      }
+      detectionService.stop();
+    };
+  }, []);
 
   const handleDetection = useCallback((event: any) => {
     const msg = `[${event.type.toUpperCase()}] ${event.message}`;
