@@ -183,16 +183,7 @@ export default function CameraScreen() {
           </View>
         ) : null}
 
-        <View style={styles.logBox}>
-          <Text style={styles.logTitle}>Logs:</Text>
-          <ScrollView style={styles.logScroll}>
-            {logs.map((log, i) => (
-              <Text key={i} style={styles.logText}>{log}</Text>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.footer}>
+        <View style={styles.middleArea}>
           <Text style={styles.statusText}>
             {isStreaming ? 'Transmitiendo...' : isConnecting ? 'Conectando...' : connectionState === 'connected' ? 'Conectado' : 'Esperando conexión...'}
           </Text>
@@ -207,6 +198,15 @@ export default function CameraScreen() {
               <Text style={styles.streamButtonText}>Iniciar Transmisión</Text>
             </TouchableOpacity>
           )}
+        </View>
+
+        <View style={styles.logBox}>
+          <Text style={styles.logTitle}>Logs:</Text>
+          <ScrollView style={styles.logScroll}>
+            {logs.map((log, i) => (
+              <Text key={i} style={styles.logText}>{log}</Text>
+            ))}
+          </ScrollView>
         </View>
       </View>
     </View>
@@ -295,10 +295,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold',
   },
-  footer: {
+  middleArea: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     padding: 12,
     borderRadius: 10,
+    marginBottom: 8,
   },
   statusText: {
     color: '#FFF',
@@ -341,9 +342,9 @@ const styles = StyleSheet.create({
   },
   logBox: {
     backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 8,
+    padding: 6,
     borderRadius: 10,
-    maxHeight: 150,
+    maxHeight: 100,
   },
   logTitle: {
     color: '#888',
