@@ -53,7 +53,7 @@ export interface RegisterPayload {
 }
 
 export interface SignalingMessage {
-  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect' | 'alert' | 'camera-online' | 'camera-offline';
+  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect' | 'alert' | 'camera-online' | 'camera-offline' | 'ping' | 'pong' | 'renegotiate';
   deviceId: string;
   targetDeviceId?: string;
   role?: DeviceRole;

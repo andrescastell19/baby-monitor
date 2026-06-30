@@ -12,6 +12,7 @@ export function useWebRTC() {
   const [signalingStatus, setSignalingStatus] = useState<string>('disconnected');
   const { setStatus, setError, localDevice, remoteDevice, addAlert } = useConnectionStore();
   const signalingConnected = useRef(false);
+  const isInitialized = useRef(false);
 
   const handleSignalingMessage = useCallback(async (message: SignalingMessage) => {
     console.log('Signaling message received:', message.type);
@@ -54,21 +55,40 @@ export function useWebRTC() {
             });
           }
           break;
+        case 'ping':
+          signalingService.send({ type: 'pong', deviceId: localDevice?.id || '' } as any);
+          break;
+        case 'pong':
+          console.log('Keepalive pong received');
+          break;
+        case 'renegotiate':
+          console.log('Renegotiate requested by remote');
+          webrtcService.renegotiate();
+          break;
       }
     } catch (err) {
       console.error('Error handling signaling message:', message.type, err);
     }
-  }, [addAlert]);
+  }, [addAlert, localDevice?.id]);
 
   const handleStatus = useCallback((status: 'connected' | 'disconnected' | 'error') => {
     console.log('Signaling status:', status);
     setSignalingStatus(status);
     if (status === 'connected') {
       setStatus('connecting');
+    } else if (status === 'disconnected') {
+      setStatus('disconnected');
     } else if (status === 'error') {
       setError('Error de conexión con el servidor');
     }
   }, [setStatus, setError]);
+
+  const handleReconnect = useCallback(() => {
+    if (isInitialized.current) {
+      console.log('Signaling reconnected, renegotiating WebRTC...');
+      webrtcService.renegotiate();
+    }
+  }, []);
 
   useEffect(() => {
     if (!localDevice || signalingConnected.current) return;
@@ -76,13 +96,13 @@ export function useWebRTC() {
 
     console.log('Connecting to signaling with device:', localDevice.id, 'role:', localDevice.role);
     setSignalingStatus('connecting');
-    signalingService.connect(localDevice.id, localDevice.role, handleSignalingMessage, handleStatus);
+    signalingService.connect(localDevice.id, localDevice.role, handleSignalingMessage, handleStatus, handleReconnect);
 
     return () => {
       signalingService.disconnect();
       webrtcService.disconnect();
     };
-  }, [localDevice, handleSignalingMessage, handleStatus]);
+  }, [localDevice, handleSignalingMessage, handleStatus, handleReconnect]);
 
   const initializeAsCamera = useCallback(async () => {
     if (!localDevice || !remoteDevice) {
@@ -90,6 +110,7 @@ export function useWebRTC() {
     }
 
     console.log('Initializing camera:', localDevice.id, '->', remoteDevice.id);
+    isInitialized.current = true;
 
     await webrtcService.initializeAsCamera(
       localDevice.id,
@@ -102,8 +123,13 @@ export function useWebRTC() {
       (state) => {
         console.log('Connection state:', state);
         setConnectionState(state);
-        if (state === 'connected') setStatus('connected');
-        if (state === 'failed') setError('Conexión fallida');
+        if (state === 'connected') {
+          setStatus('connected');
+        } else if (state === 'failed') {
+          setError('Conexión fallida');
+        } else if (state === 'disconnected') {
+          setStatus('connecting');
+        }
       }
     );
 
@@ -113,7 +139,7 @@ export function useWebRTC() {
     }
 
     await webrtcService.createOffer();
-  }, [localDevice, remoteDevice]);
+  }, [localDevice, remoteDevice, setStatus, setError]);
 
   const initializeAsMonitor = useCallback(async () => {
     if (!localDevice || !remoteDevice) {
@@ -121,6 +147,7 @@ export function useWebRTC() {
     }
 
     console.log('Initializing monitor:', localDevice.id, '->', remoteDevice.id);
+    isInitialized.current = true;
 
     await webrtcService.initializeAsMonitor(
       localDevice.id,
@@ -132,11 +159,16 @@ export function useWebRTC() {
       (state) => {
         console.log('Connection state:', state);
         setConnectionState(state);
-        if (state === 'connected') setStatus('connected');
-        if (state === 'failed') setError('Conexión fallida');
+        if (state === 'connected') {
+          setStatus('connected');
+        } else if (state === 'failed') {
+          setError('Conexión fallida');
+        } else if (state === 'disconnected') {
+          setStatus('connecting');
+        }
       }
     );
-  }, [localDevice, remoteDevice]);
+  }, [localDevice, remoteDevice, setStatus, setError]);
 
   const muteAudio = useCallback(() => {
     webrtcService.muteAudio();

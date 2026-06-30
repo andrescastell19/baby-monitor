@@ -18,12 +18,14 @@ class SignalingService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = Infinity;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private onReconnectCallback: (() => void) | null = null;
 
-  connect(deviceId: string, role: string, onMessage: MessageHandler, onStatus: StatusHandler) {
+  connect(deviceId: string, role: string, onMessage: MessageHandler, onStatus: StatusHandler, onReconnect?: () => void) {
     this.deviceId = deviceId;
     this.deviceRole = role;
     this.onMessage = onMessage;
     this.onStatus = onStatus;
+    this.onReconnectCallback = onReconnect || null;
 
     console.log('Connecting to signaling server:', SERVER_URL);
 
@@ -73,7 +75,8 @@ class SignalingService {
       console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
       this.reconnectTimeout = setTimeout(() => {
-        this.connect(this.deviceId, this.deviceRole, this.onMessage!, this.onStatus!);
+        this.connect(this.deviceId, this.deviceRole, this.onMessage!, this.onStatus!, this.onReconnectCallback || undefined);
+        setTimeout(() => this.onReconnectCallback?.(), 1000);
       }, delay);
     }
   }

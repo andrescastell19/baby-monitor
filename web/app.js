@@ -132,10 +132,17 @@ function createPeerConnection() {
         remoteVideo.play().catch(() => {});
         break;
       case 'disconnected':
-        streamStatus.textContent = 'Desconectado';
+        streamStatus.textContent = 'Desconectado - reconectando...';
+        videoOverlay.classList.remove('hidden');
+        document.getElementById('waitingSubtext').textContent = 'Conexión interrumpida, reconectando...';
         break;
       case 'failed':
-        streamStatus.textContent = 'Conexion fallida';
+        streamStatus.textContent = 'Conexion fallida - reconectando...';
+        videoOverlay.classList.remove('hidden');
+        document.getElementById('waitingSubtext').textContent = 'Conexión fallida, intentando reconectar...';
+        if (CAMERA_DEVICE_ID) {
+          setTimeout(() => requestNewOffer(), 2000);
+        }
         break;
     }
   };
@@ -146,8 +153,32 @@ function createPeerConnection() {
       videoOverlay.classList.add('hidden');
       streamStatus.textContent = 'Recibiendo transmisión';
       remoteVideo.play().catch(() => {});
+    } else if (pc.iceConnectionState === 'disconnected') {
+      streamStatus.textContent = 'ICE desconectado - reconectando...';
+      if (CAMERA_DEVICE_ID) {
+        setTimeout(() => {
+          if (pc && pc.iceConnectionState === 'disconnected') {
+            requestNewOffer();
+          }
+        }, 3000);
+      }
+    } else if (pc.iceConnectionState === 'failed') {
+      streamStatus.textContent = 'ICE fallido - reconectando...';
+      if (CAMERA_DEVICE_ID) {
+        setTimeout(() => requestNewOffer(), 2000);
+      }
     }
   };
+}
+
+function requestNewOffer() {
+  if (!CAMERA_DEVICE_ID || !ws || ws.readyState !== WebSocket.OPEN) return;
+  console.log('Requesting new offer from camera:', CAMERA_DEVICE_ID);
+  sendSignaling({
+    type: 'renegotiate',
+    deviceId: DEVICE_ID,
+    targetDeviceId: CAMERA_DEVICE_ID,
+  });
 }
 
 function sendSignaling(message) {
@@ -206,6 +237,20 @@ function handleSignalingMessage(message) {
 
     case 'alert':
       addAlert(message.payload);
+      break;
+
+    case 'ping':
+      sendSignaling({ type: 'pong', deviceId: DEVICE_ID });
+      break;
+
+    case 'pong':
+      console.log('Keepalive pong received');
+      break;
+
+    case 'renegotiate':
+      if (CAMERA_DEVICE_ID) {
+        console.log('Renegotiate requested, waiting for offer...');
+      }
       break;
   }
 }

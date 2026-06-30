@@ -41,9 +41,12 @@ export default function MonitorScreen() {
     if (connectionState === 'connected') {
       setIsConnected(true);
       addLog('WebRTC CONECTADO');
-    }
-    if (connectionState === 'failed') {
-      addLog('WebRTC FALLIDO');
+    } else if (connectionState === 'failed') {
+      setIsConnected(false);
+      addLog('WebRTC FALLIDO - intentando reconectar...');
+    } else if (connectionState === 'disconnected') {
+      setIsConnected(false);
+      addLog('WebRTC DESCONECTADO - reconectando...');
     }
   }, [connectionState]);
 

@@ -34,7 +34,14 @@ export default function CameraScreen() {
   useEffect(() => {
     if (connectionState === 'connected') {
       setIsStreaming(true);
+      setIsConnecting(false);
       addLog('WebRTC CONECTADO');
+    } else if (connectionState === 'failed') {
+      setIsStreaming(false);
+      addLog('WebRTC FALLIDO - intentando reconectar...');
+    } else if (connectionState === 'disconnected') {
+      setIsStreaming(false);
+      addLog('WebRTC DESCONECTADO - reconectando...');
     }
     if (connectionState !== 'new') {
       addLog(`WebRTC state: ${connectionState}`);

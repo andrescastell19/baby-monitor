@@ -15,6 +15,16 @@ class WebRTCService {
   private remoteDescriptionSet: boolean = false;
   private pendingOffer: any = null;
 
+  private role: 'camera' | 'monitor' = 'camera';
+  private disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private frozenCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private lastFramesReceived = 0;
+  private lastFramesCheckTime = 0;
+  private lastRemoteStreamTime = 0;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+
   private getConfiguration() {
     return {
       iceServers: [
@@ -29,6 +39,143 @@ class WebRTCService {
     this.pendingCandidates = [];
     this.remoteDescriptionSet = false;
     this.pendingOffer = null;
+    this.reconnectAttempts = 0;
+    this.lastFramesReceived = 0;
+    this.lastFramesCheckTime = 0;
+    this.lastRemoteStreamTime = Date.now();
+    this.clearTimers();
+  }
+
+  private clearTimers() {
+    if (this.disconnectedTimer) { clearTimeout(this.disconnectedTimer); this.disconnectedTimer = null; }
+    if (this.keepaliveInterval) { clearInterval(this.keepaliveInterval); this.keepaliveInterval = null; }
+    if (this.frozenCheckInterval) { clearInterval(this.frozenCheckInterval); this.frozenCheckInterval = null; }
+  }
+
+  private setupKeepalive() {
+    this.clearTimers();
+
+    this.keepaliveInterval = setInterval(() => {
+      if (!this.pc) return;
+      signalingService.send({
+        type: 'ping',
+        deviceId: this.deviceId,
+      } as any);
+    }, 3000);
+
+    this.frozenCheckInterval = setInterval(() => this.checkFrozenStream(), 4000);
+  }
+
+  private async checkFrozenStream() {
+    if (!this.pc || this.pc.connectionState !== 'connected') return;
+
+    try {
+      const stats = await this.pc.getStats();
+      let framesReceived = 0;
+
+      stats.forEach((report: any) => {
+        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+          framesReceived = report.framesReceived || 0;
+        }
+      });
+
+      if (this.lastFramesReceived > 0 && framesReceived === this.lastFramesReceived) {
+        const stallTime = Date.now() - this.lastRemoteStreamTime;
+        console.log(`Stream frozen check: same frames for ${stallTime}ms`);
+
+        if (stallTime > 5000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          console.log('Stream appears frozen, attempting ICE restart');
+          await this.attemptIceRestart();
+        }
+      } else {
+        this.lastRemoteStreamTime = Date.now();
+      }
+
+      this.lastFramesReceived = framesReceived;
+    } catch (err) {
+      console.warn('Error checking frozen stream:', err);
+    }
+  }
+
+  private async attemptIceRestart() {
+    if (!this.pc) return;
+
+    this.reconnectAttempts++;
+    console.log(`ICE restart attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+
+    try {
+      this.pc.restartIce();
+      await this.createOffer();
+      console.log('ICE restart offer sent');
+    } catch (err) {
+      console.error('ICE restart failed:', err);
+
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.log('Max reconnect attempts reached, tearing down');
+        this.onConnectionState?.('failed');
+      }
+    }
+  }
+
+  private handleIceStateChange() {
+    if (!this.pc) return;
+
+    const state = this.pc.iceConnectionState;
+    console.log('ICE connection state:', state);
+
+    switch (state) {
+      case 'disconnected':
+        console.log('ICE disconnected, waiting for recovery...');
+        this.disconnectedTimer = setTimeout(async () => {
+          if (this.pc?.iceConnectionState === 'disconnected' && this.reconnectAttempts < this.maxReconnectAttempts) {
+            console.log('ICE still disconnected after 3s, attempting restart');
+            await this.attemptIceRestart();
+          }
+        }, 3000);
+        break;
+
+      case 'failed':
+        console.log('ICE connection failed');
+        this.onConnectionState?.('failed');
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.attemptIceRestart();
+        }
+        break;
+
+      case 'connected':
+      case 'completed':
+        if (this.disconnectedTimer) {
+          clearTimeout(this.disconnectedTimer);
+          this.disconnectedTimer = null;
+        }
+        this.reconnectAttempts = 0;
+        this.lastRemoteStreamTime = Date.now();
+        console.log('ICE connected/completed');
+        break;
+    }
+  }
+
+  private setupPeerConnection(pc: any) {
+    pc.onicecandidate = (event: any) => {
+      if (event.candidate) {
+        signalingService.sendCandidate(this.remoteDeviceId, event.candidate);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => this.handleIceStateChange();
+
+    pc.ontrack = (event: any) => {
+      console.log('Remote track received:', event.track.kind);
+      this.remoteStream = event.streams[0];
+      this.lastRemoteStreamTime = Date.now();
+      this.onRemoteStream?.(this.remoteStream);
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      console.log('Connection state:', state);
+      this.onConnectionState?.(state);
+    };
   }
 
   async initializeAsCamera(
@@ -41,30 +188,13 @@ class WebRTCService {
     this.remoteDeviceId = remoteDeviceId;
     this.onRemoteStream = onRemoteStream;
     this.onConnectionState = onConnectionState;
+    this.role = 'camera';
     this.resetState();
 
     const { RTCPeerConnection, mediaDevices } = require('react-native-webrtc');
 
     this.pc = new RTCPeerConnection(this.getConfiguration());
-
-    this.pc.onicecandidate = (event: any) => {
-      if (event.candidate) {
-        signalingService.sendCandidate(remoteDeviceId, event.candidate);
-      }
-    };
-
-    this.pc.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', this.pc.iceConnectionState);
-    };
-
-    this.pc.ontrack = (event: any) => {
-      this.remoteStream = event.streams[0];
-      this.onRemoteStream?.(this.remoteStream);
-    };
-
-    this.pc.onconnectionstatechange = () => {
-      this.onConnectionState?.(this.pc.connectionState);
-    };
+    this.setupPeerConnection(this.pc);
 
     const constraints = {
       audio: true,
@@ -83,6 +213,7 @@ class WebRTCService {
       this.pc.addTrack(track, this.localStream);
     });
     this.onRemoteStream?.(this.localStream);
+    this.setupKeepalive();
   }
 
   async initializeAsMonitor(
@@ -95,32 +226,15 @@ class WebRTCService {
     this.remoteDeviceId = remoteDeviceId;
     this.onRemoteStream = onRemoteStream;
     this.onConnectionState = onConnectionState;
+    this.role = 'monitor';
     this.resetState();
 
     const { RTCPeerConnection } = require('react-native-webrtc');
 
     this.pc = new RTCPeerConnection(this.getConfiguration());
+    this.setupPeerConnection(this.pc);
 
-    this.pc.onicecandidate = (event: any) => {
-      if (event.candidate) {
-        signalingService.sendCandidate(remoteDeviceId, event.candidate);
-      }
-    };
-
-    this.pc.oniceconnectionstatechange = () => {
-      console.log('ICE connection state:', this.pc.iceConnectionState);
-    };
-
-    this.pc.ontrack = (event: any) => {
-      console.log('Remote track received:', event.track.kind);
-      this.remoteStream = event.streams[0];
-      this.onRemoteStream?.(this.remoteStream);
-    };
-
-    this.pc.onconnectionstatechange = () => {
-      console.log('Connection state:', this.pc.connectionState);
-      this.onConnectionState?.(this.pc.connectionState);
-    };
+    this.setupKeepalive();
 
     if (this.pendingOffer) {
       console.log('Processing queued offer from initializeAsMonitor');
@@ -133,9 +247,23 @@ class WebRTCService {
   async createOffer() {
     if (!this.pc) throw new Error('PeerConnection not initialized');
 
+    this.remoteDescriptionSet = false;
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     signalingService.sendOffer(this.remoteDeviceId, offer);
+  }
+
+  async renegotiate() {
+    if (!this.pc || this.role !== 'camera') return;
+
+    console.log('Renegotiating after signaling reconnect');
+    try {
+      this.remoteDescriptionSet = false;
+      this.pendingCandidates = [];
+      await this.createOffer();
+    } catch (err) {
+      console.error('Renegotiation failed:', err);
+    }
   }
 
   async handleOffer(sdp: any) {
@@ -241,6 +369,7 @@ class WebRTCService {
   }
 
   disconnect() {
+    this.clearTimers();
     this.localStream?.getTracks().forEach((track: any) => track.stop());
     this.pc?.close();
     this.pc = null;

@@ -40,13 +40,21 @@ const devices = new Map();
 function handleWsConnection(ws) {
   console.log('New client connected');
 
+  ws.isAlive = true;
+  ws.lastPong = Date.now();
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
+    ws.lastPong = Date.now();
+  });
+
   ws.on('message', (data) => {
     try {
       const message = JSON.parse(data.toString());
 
       switch (message.type) {
         case 'register': {
-          devices.set(message.deviceId, { ws, role: message.role });
+          devices.set(message.deviceId, { ws, role: message.role, lastPong: Date.now() });
           console.log(`Device registered: ${message.deviceId} (${message.role})`);
           console.log('All devices:', Array.from(devices.entries()).map(([id, d]) => ({ id, role: d.role })));
 
@@ -102,6 +110,28 @@ function handleWsConnection(ws) {
           broadcastToMonitors({ type: 'alert', deviceId: message.deviceId, payload: message.payload });
           break;
         }
+
+        case 'ping': {
+          let target = devices.get(message.targetDeviceId);
+          if (target) {
+            target.ws.send(JSON.stringify({ type: 'pong', deviceId: message.deviceId }));
+          } else {
+            for (const [id, device] of devices) {
+              if (device.ws !== ws) {
+                try { device.ws.send(JSON.stringify({ type: 'pong', deviceId: message.deviceId })); } catch (e) {}
+              }
+            }
+          }
+          break;
+        }
+
+        case 'pong': {
+          const deviceEntry = Array.from(devices.entries()).find(([_, d]) => d.ws === ws);
+          if (deviceEntry) {
+            deviceEntry[1].lastPong = Date.now();
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('Error processing message:', err);
@@ -133,6 +163,30 @@ function broadcastToMonitors(message) {
 
 const wss = new WebSocketServer({ server });
 wss.on('connection', handleWsConnection);
+
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) {
+      console.log('Terminating stale connection');
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+
+  const now = Date.now();
+  for (const [id, device] of devices) {
+    if (now - device.lastPong > 30000) {
+      console.log(`Device ${id} timed out (no pong in 30s)`);
+      devices.delete(id);
+      if (device.role === 'camera') {
+        broadcastToMonitors({ type: 'camera-offline', deviceId: id });
+      }
+    }
+  }
+}, 15000);
+
+wss.on('close', () => clearInterval(heartbeatInterval));
 
 server.listen(PORT, () => {
   console.log('');
