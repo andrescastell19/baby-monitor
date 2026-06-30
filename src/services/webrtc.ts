@@ -71,9 +71,11 @@ class WebRTCService {
   }
 
   private async checkFrozenStream() {
-    if (!this.pc || this.pc.connectionState !== 'connected') return;
+    if (!this.pc || this.isReconnecting) return;
 
     try {
+      if (this.pc.connectionState !== 'connected') return;
+
       const stats = await this.pc.getStats();
       let framesReceived = 0;
 
@@ -87,8 +89,8 @@ class WebRTCService {
         const stallTime = Date.now() - this.lastRemoteStreamTime;
         console.log(`Stream frozen: same frames for ${stallTime}ms`);
 
-        if (stallTime > 5000 && !this.isReconnecting) {
-          console.log('Stream frozen, attempting reconnection');
+        if (stallTime > 3000) {
+          console.log('Stream frozen, attempting full reconnect');
           await this.fullReconnect();
         }
       } else {
@@ -97,7 +99,8 @@ class WebRTCService {
 
       this.lastFramesReceived = framesReceived;
     } catch (err) {
-      console.warn('Error checking frozen stream:', err);
+      console.warn('getStats failed (network may have changed):', err);
+      await this.fullReconnect();
     }
   }
 
@@ -196,11 +199,11 @@ class WebRTCService {
 
     switch (state) {
       case 'disconnected':
-        console.log('ICE disconnected, waiting for recovery...');
+        console.log('ICE disconnected, waiting 3s for recovery...');
         this.disconnectedTimer = setTimeout(async () => {
           if (this.pc?.iceConnectionState === 'disconnected' && !this.isReconnecting) {
-            console.log('ICE still disconnected after 3s, attempting restart');
-            await this.attemptIceRestart();
+            console.log('ICE still disconnected after 3s, full reconnect');
+            await this.fullReconnect();
           }
         }, 3000);
         break;
@@ -325,16 +328,8 @@ class WebRTCService {
   }
 
   async renegotiate() {
-    if (!this.pc || this.role !== 'camera') return;
-
     console.log('Renegotiating after signaling reconnect');
-    try {
-      this.remoteDescriptionSet = false;
-      this.pendingCandidates = [];
-      await this.createOffer();
-    } catch (err) {
-      console.error('Renegotiation failed:', err);
-    }
+    await this.fullReconnect();
   }
 
   async handleOffer(sdp: any) {

@@ -20,6 +20,9 @@ let lastMotionAlert = 0;
 let prevFrameData = null;
 let motionCanvas = null;
 let motionCtx = null;
+let lastVideoWidth = 0;
+let lastVideoHeight = 0;
+let videoStallCheckInterval = null;
 
 const iceServers = {
   iceServers: [
@@ -124,6 +127,7 @@ function createPeerConnection() {
       remoteVideo.srcObject = remoteStream;
       startAudioDetection(remoteStream);
       startMotionDetection(remoteStream);
+      startVideoStallDetection(remoteStream);
     }
   };
 
@@ -181,7 +185,7 @@ function requestNewOffer() {
   if (!CAMERA_DEVICE_ID || !ws || ws.readyState !== WebSocket.OPEN) return;
   if (reconnecting) return;
   reconnecting = true;
-  console.log('Full reconnect: recreating PC and requesting new offer');
+  console.log('Web: video frozen, closing PC and waiting for camera to re-offer');
 
   if (pc) {
     try { pc.close(); } catch (e) {}
@@ -189,15 +193,11 @@ function requestNewOffer() {
   }
   pendingCandidates = [];
   remoteDescriptionSet = false;
+  streamStatus.textContent = 'Reconectando...';
+  videoOverlay.classList.remove('hidden');
+  document.getElementById('waitingSubtext').textContent = 'Esperando reconexión de cámara...';
 
-  setTimeout(() => {
-    sendSignaling({
-      type: 'renegotiate',
-      deviceId: DEVICE_ID,
-      targetDeviceId: CAMERA_DEVICE_ID,
-    });
-    reconnecting = false;
-  }, 1000);
+  setTimeout(() => { reconnecting = false; }, 5000);
 }
 
 function sendSignaling(message) {
@@ -224,6 +224,7 @@ function handleSignalingMessage(message) {
       document.getElementById('streamStatus').textContent = 'Cámara desconectada';
       if (audioCheckInterval) { clearInterval(audioCheckInterval); audioCheckInterval = null; }
       if (motionCheckInterval) { clearInterval(motionCheckInterval); motionCheckInterval = null; }
+      if (videoStallCheckInterval) { clearInterval(videoStallCheckInterval); videoStallCheckInterval = null; }
       if (audioContext) { audioContext.close(); audioContext = null; }
       prevFrameData = null;
       break;
@@ -445,6 +446,43 @@ function startMotionDetection(stream) {
   } catch (e) {
     console.error('Motion detection error:', e);
   }
+}
+
+function startVideoStallDetection(stream) {
+  if (videoStallCheckInterval) clearInterval(videoStallCheckInterval);
+
+  const stallCanvas = document.createElement('canvas');
+  stallCanvas.width = 64;
+  stallCanvas.height = 48;
+  const stallCtx = stallCanvas.getContext('2d', { willReadFrequently: true });
+  let lastStallCheck = Date.now();
+  let lastPixelHash = '';
+
+  videoStallCheckInterval = setInterval(() => {
+    if (remoteVideo.readyState < 2 || !pc || pc.connectionState !== 'connected') return;
+
+    try {
+      stallCtx.drawImage(remoteVideo, 0, 0, 64, 48);
+      const data = stallCtx.getImageData(0, 0, 64, 48).data;
+      let hash = 0;
+      for (let i = 0; i < data.length; i += 64) {
+        hash = ((hash << 5) - hash + data[i]) | 0;
+      }
+      const pixelHash = String(hash);
+
+      if (pixelHash === lastPixelHash) {
+        const stallMs = Date.now() - lastStallCheck;
+        if (stallMs > 4000) {
+          console.log('Web: video frozen for', stallMs, 'ms, requesting new offer');
+          lastStallCheck = Date.now();
+          requestNewOffer();
+        }
+      } else {
+        lastPixelHash = pixelHash;
+        lastStallCheck = Date.now();
+      }
+    } catch (e) {}
+  }, 1000);
 }
 
 function renderAlerts() {
