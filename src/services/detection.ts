@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { signalingService } from './signaling';
 
 export type DetectionType = 'sound' | 'motion';
 
@@ -14,63 +14,77 @@ type DetectionCallback = (event: DetectionEvent) => void;
 class DetectionService {
   private isRunning = false;
   private onDetection: DetectionCallback | null = null;
-  private lastMotionTime = 0;
-  private motionThreshold = 0.5;
-  private soundThreshold = 0.7;
   private checkInterval: ReturnType<typeof setInterval> | null = null;
+  private lastAlertTime = 0;
+  private cooldownMs = 3000;
+  private soundThreshold = -50;
+  private pc: any = null;
 
-  start(onDetection: DetectionCallback) {
+  start(pc: any, onDetection: DetectionCallback, threshold = -50) {
     if (this.isRunning) return;
 
+    this.pc = pc;
     this.isRunning = true;
     this.onDetection = onDetection;
+    this.soundThreshold = threshold;
+    this.lastAlertTime = 0;
+
+    console.log('Sound detection started, threshold:', threshold, 'dB');
 
     this.checkInterval = setInterval(() => {
-      this.simulateDetection();
-    }, 1000);
+      this.checkAudioLevel();
+    }, 800);
   }
 
-  private simulateDetection() {
-    if (!this.isRunning) return;
+  private async checkAudioLevel() {
+    if (!this.isRunning || !this.pc) return;
 
-    const now = Date.now();
-    const randomValue = Math.random();
+    try {
+      const stats = await this.pc.getStats();
+      let audioLevel = -100;
 
-    if (randomValue > this.soundThreshold) {
-      this.emitDetection({
-        type: 'sound',
-        timestamp: now,
-        confidence: randomValue,
-        message: `Sonido detectado (${Math.round(randomValue * 100)}%)`,
+      stats.forEach((report: any) => {
+        if (report.type === 'media-source' && report.kind === 'audio') {
+          if (report.audioLevel !== undefined) {
+            audioLevel = 20 * Math.log10(Math.max(report.audioLevel, 0.0001));
+          }
+        }
       });
-    }
 
-    if (randomValue > this.motionThreshold && now - this.lastMotionTime > 2000) {
-      this.lastMotionTime = now;
-      this.emitDetection({
-        type: 'motion',
-        timestamp: now,
-        confidence: randomValue,
-        message: `Movimiento detectado (${Math.round(randomValue * 100)}%)`,
-      });
-    }
-  }
+      if (audioLevel > -100) {
+        console.log('Audio level:', audioLevel.toFixed(1), 'dB');
 
-  private emitDetection(event: DetectionEvent) {
-    this.onDetection?.(event);
+        if (audioLevel > this.soundThreshold) {
+          const now = Date.now();
+          if (now - this.lastAlertTime > this.cooldownMs) {
+            this.lastAlertTime = now;
+            const confidence = Math.min(100, Math.round(((audioLevel - this.soundThreshold) / 30) * 100));
+            this.onDetection?.({
+              type: 'sound',
+              timestamp: now,
+              confidence,
+              message: `Sonido fuerte detectado (${confidence}%)`,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error checking audio level:', err);
+    }
   }
 
   stop() {
     this.isRunning = false;
+    this.pc = null;
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
     }
+    console.log('Sound detection stopped');
   }
 
-  updateThresholds(soundThreshold: number, motionThreshold: number) {
-    this.soundThreshold = soundThreshold;
-    this.motionThreshold = motionThreshold;
+  updateThreshold(threshold: number) {
+    this.soundThreshold = threshold;
   }
 }
 

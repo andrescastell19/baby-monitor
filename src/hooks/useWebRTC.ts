@@ -3,43 +3,62 @@ import { Platform } from 'react-native';
 import { webrtcService } from '../services/webrtc';
 import { signalingService } from '../services/signaling';
 import { useConnectionStore } from '../stores/connectionStore';
-import { SignalingMessage } from '../types';
+import { SignalingMessage, SDPMessage, AlertPayload } from '../types';
 
 export function useWebRTC() {
   const [remoteStream, setRemoteStream] = useState<any>(null);
   const [localStream, setLocalStream] = useState<any>(null);
   const [connectionState, setConnectionState] = useState<string>('new');
   const [signalingStatus, setSignalingStatus] = useState<string>('disconnected');
-  const { setStatus, setError, localDevice, remoteDevice } = useConnectionStore();
+  const { setStatus, setError, localDevice, remoteDevice, addAlert } = useConnectionStore();
   const signalingConnected = useRef(false);
 
   const handleSignalingMessage = useCallback(async (message: SignalingMessage) => {
     console.log('Signaling message received:', message.type);
     try {
       switch (message.type) {
-        case 'offer':
-          if (message.payload?.sdp) {
+        case 'offer': {
+          const sdp = (message.payload as SDPMessage)?.sdp;
+          if (sdp) {
             console.log('Handling WebRTC offer from:', message.deviceId);
-            await webrtcService.handleOffer(message.payload.sdp);
+            await webrtcService.handleOffer(sdp);
           }
           break;
-        case 'answer':
-          if (message.payload?.sdp) {
+        }
+        case 'answer': {
+          const sdp = (message.payload as SDPMessage)?.sdp;
+          if (sdp) {
             console.log('Handling WebRTC answer from:', message.deviceId);
-            await webrtcService.handleAnswer(message.payload.sdp);
+            await webrtcService.handleAnswer(sdp);
           }
           break;
-        case 'candidate':
-          if (message.payload?.candidate) {
+        }
+        case 'candidate': {
+          const candidate = (message.payload as SDPMessage)?.candidate;
+          if (candidate) {
             console.log('Handling ICE candidate from:', message.deviceId);
-            await webrtcService.handleCandidate(message.payload.candidate);
+            await webrtcService.handleCandidate(candidate);
+          }
+          break;
+        }
+        case 'alert':
+          if (message.payload) {
+            const alertPayload = message.payload as AlertPayload;
+            console.log('Alert received:', alertPayload.type, alertPayload.message);
+            addAlert({
+              id: Date.now().toString(),
+              type: alertPayload.type,
+              timestamp: Date.now(),
+              message: alertPayload.message,
+              read: false,
+            });
           }
           break;
       }
     } catch (err) {
       console.error('Error handling signaling message:', message.type, err);
     }
-  }, []);
+  }, [addAlert]);
 
   const handleStatus = useCallback((status: 'connected' | 'disconnected' | 'error') => {
     console.log('Signaling status:', status);

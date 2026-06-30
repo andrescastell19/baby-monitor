@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useConnectionStore } from '../stores/connectionStore';
+import { detectionService } from '../services/detection';
+import { signalingService } from '../services/signaling';
 
 export default function CameraScreen() {
   const { localDevice, remoteDevice } = useConnectionStore();
@@ -14,6 +16,9 @@ export default function CameraScreen() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [detectionActive, setDetectionActive] = useState(false);
+  const [lastAlert, setLastAlert] = useState<string | null>(null);
+  const detectionStarted = useRef(false);
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -35,6 +40,36 @@ export default function CameraScreen() {
       addLog(`WebRTC state: ${connectionState}`);
     }
   }, [connectionState]);
+
+  const handleDetection = useCallback((event: any) => {
+    const msg = `[${event.type.toUpperCase()}] ${event.message}`;
+    addLog(msg);
+    setLastAlert(msg);
+    signalingService.sendAlert(event.type, event.message, event.confidence);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      detectionService.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (localStream && connectionState === 'connected' && !detectionStarted.current) {
+      detectionStarted.current = true;
+      setDetectionActive(true);
+      addLog('Iniciando detección de sonido...');
+
+      const { webrtcService } = require('../services/webrtc');
+      const pc = webrtcService.getPeerConnection();
+      if (pc) {
+        detectionService.start(pc, handleDetection);
+        addLog('Detección de sonido activa');
+      } else {
+        addLog('WARN: PeerConnection no disponible aún');
+      }
+    }
+  }, [localStream, connectionState, handleDetection]);
 
   const startStreaming = async () => {
     setError(null);
@@ -124,14 +159,27 @@ export default function CameraScreen() {
       <View style={styles.overlay}>
         <View style={styles.header}>
           <Text style={styles.title}>Cámara Activa</Text>
-          <View style={[styles.statusDot, {
-            backgroundColor: isStreaming ? '#4CAF50' : error ? '#F44336' : '#FF9800'
-          }]} />
+          <View style={styles.headerRight}>
+            {detectionActive && (
+              <View style={styles.detectionBadge}>
+                <Text style={styles.detectionBadgeText}>🎤</Text>
+              </View>
+            )}
+            <View style={[styles.statusDot, {
+              backgroundColor: isStreaming ? '#4CAF50' : error ? '#F44336' : '#FF9800'
+            }]} />
+          </View>
         </View>
 
         {error ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorText}>❌ {error}</Text>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {lastAlert ? (
+          <View style={styles.alertBanner}>
+            <Text style={styles.alertBannerText}>{lastAlert}</Text>
           </View>
         ) : null}
 
@@ -202,6 +250,11 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   title: {
     color: '#FFF',
     fontSize: 16,
@@ -211,6 +264,26 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
+  },
+  detectionBadge: {
+    backgroundColor: 'rgba(76,175,80,0.8)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  detectionBadgeText: {
+    fontSize: 12,
+  },
+  alertBanner: {
+    backgroundColor: 'rgba(255,87,34,0.9)',
+    padding: 10,
+    borderRadius: 8,
+  },
+  alertBannerText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
   errorBox: {
     backgroundColor: 'rgba(244,67,54,0.9)',

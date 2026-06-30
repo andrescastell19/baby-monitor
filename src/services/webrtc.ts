@@ -224,6 +224,10 @@ class WebRTCService {
     return this.remoteStream;
   }
 
+  getPeerConnection() {
+    return this.pc;
+  }
+
   muteAudio() {
     this.localStream?.getAudioTracks().forEach((track: any) => {
       track.enabled = false;

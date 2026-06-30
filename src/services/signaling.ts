@@ -62,7 +62,7 @@ class SignalingService {
     this.send({
       type: 'register',
       deviceId: this.deviceId,
-      role: this.deviceRole,
+      role: this.deviceRole as any,
     });
   }
 
@@ -109,6 +109,14 @@ class SignalingService {
       targetDeviceId,
       payload: { type: 'candidate', candidate },
     });
+  }
+
+  sendAlert(type: 'sound' | 'motion', message: string, confidence?: number) {
+    this.send({
+      type: 'alert',
+      deviceId: this.deviceId,
+      payload: { type, message, confidence },
+    } as any);
   }
 
   disconnect() {

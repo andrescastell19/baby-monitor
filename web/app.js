@@ -11,6 +11,10 @@ let alerts = [];
 let signalingConnected = false;
 let pendingCandidates = [];
 let remoteDescriptionSet = false;
+let audioContext = null;
+let analyser = null;
+let audioCheckInterval = null;
+let lastSoundAlert = 0;
 
 const iceServers = {
   iceServers: [
@@ -109,6 +113,7 @@ function createPeerConnection() {
 
     if (remoteVideo.srcObject !== remoteStream) {
       remoteVideo.srcObject = remoteStream;
+      startAudioDetection(remoteStream);
     }
   };
 
@@ -161,6 +166,8 @@ function handleSignalingMessage(message) {
       console.log('Camera went offline');
       document.getElementById('waitingSubtext').textContent = 'Cámara desconectada. Esperando reconexión...';
       document.getElementById('streamStatus').textContent = 'Cámara desconectada';
+      if (audioCheckInterval) { clearInterval(audioCheckInterval); audioCheckInterval = null; }
+      if (audioContext) { audioContext.close(); audioContext = null; }
       break;
 
     case 'offer':
@@ -246,11 +253,66 @@ function addAlert(alertData) {
     id: Date.now(),
     type: alertData.type || 'sound',
     message: alertData.message || 'Alerta detectada',
+    confidence: alertData.confidence,
     timestamp: Date.now(),
     read: false
   };
   alerts.unshift(alert);
   renderAlerts();
+  playAlertSound();
+}
+
+function playAlertSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (e) {}
+}
+
+function startAudioDetection(stream) {
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    audioCheckInterval = setInterval(() => {
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const average = sum / dataArray.length;
+
+      if (average > 80) {
+        const now = Date.now();
+        if (now - lastSoundAlert > 3000) {
+          lastSoundAlert = now;
+          sendSignaling({
+            type: 'alert',
+            deviceId: DEVICE_ID,
+            payload: {
+              type: 'sound',
+              message: `Sonido fuerte detectado (${Math.round(average)}%)`,
+              confidence: Math.min(100, Math.round(average))
+            }
+          });
+        }
+      }
+    }, 500);
+  } catch (e) {
+    console.error('Audio detection error:', e);
+  }
 }
 
 function renderAlerts() {

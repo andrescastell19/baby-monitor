@@ -42,9 +42,20 @@ export interface SDPMessage {
   candidate?: RTCIceCandidateInit;
 }
 
+export interface AlertPayload {
+  type: 'sound' | 'motion';
+  message: string;
+  confidence?: number;
+}
+
+export interface RegisterPayload {
+  role: DeviceRole;
+}
+
 export interface SignalingMessage {
-  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect';
+  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect' | 'alert' | 'camera-online' | 'camera-offline';
   deviceId: string;
   targetDeviceId?: string;
-  payload?: SDPMessage;
+  role?: DeviceRole;
+  payload?: SDPMessage | AlertPayload | RegisterPayload;
 }

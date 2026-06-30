@@ -98,6 +98,7 @@ function handleWsConnection(ws) {
         }
 
         case 'alert': {
+          console.log(`Alert from ${message.deviceId}: ${message.payload?.type} - ${message.payload?.message}`);
           broadcastToMonitors({ type: 'alert', deviceId: message.deviceId, payload: message.payload });
           break;
         }
