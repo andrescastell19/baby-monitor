@@ -24,8 +24,12 @@ let motionCtx = null;
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
@@ -171,14 +175,29 @@ function createPeerConnection() {
   };
 }
 
+let reconnecting = false;
+
 function requestNewOffer() {
   if (!CAMERA_DEVICE_ID || !ws || ws.readyState !== WebSocket.OPEN) return;
-  console.log('Requesting new offer from camera:', CAMERA_DEVICE_ID);
-  sendSignaling({
-    type: 'renegotiate',
-    deviceId: DEVICE_ID,
-    targetDeviceId: CAMERA_DEVICE_ID,
-  });
+  if (reconnecting) return;
+  reconnecting = true;
+  console.log('Full reconnect: recreating PC and requesting new offer');
+
+  if (pc) {
+    try { pc.close(); } catch (e) {}
+    pc = null;
+  }
+  pendingCandidates = [];
+  remoteDescriptionSet = false;
+
+  setTimeout(() => {
+    sendSignaling({
+      type: 'renegotiate',
+      deviceId: DEVICE_ID,
+      targetDeviceId: CAMERA_DEVICE_ID,
+    });
+    reconnecting = false;
+  }, 1000);
 }
 
 function sendSignaling(message) {

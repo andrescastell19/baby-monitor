@@ -20,17 +20,21 @@ class WebRTCService {
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   private frozenCheckInterval: ReturnType<typeof setInterval> | null = null;
   private lastFramesReceived = 0;
-  private lastFramesCheckTime = 0;
   private lastRemoteStreamTime = 0;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 10;
+  private isReconnecting = false;
 
   private getConfiguration() {
     return {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
       ],
     };
   }
@@ -40,8 +44,8 @@ class WebRTCService {
     this.remoteDescriptionSet = false;
     this.pendingOffer = null;
     this.reconnectAttempts = 0;
+    this.isReconnecting = false;
     this.lastFramesReceived = 0;
-    this.lastFramesCheckTime = 0;
     this.lastRemoteStreamTime = Date.now();
     this.clearTimers();
   }
@@ -81,11 +85,11 @@ class WebRTCService {
 
       if (this.lastFramesReceived > 0 && framesReceived === this.lastFramesReceived) {
         const stallTime = Date.now() - this.lastRemoteStreamTime;
-        console.log(`Stream frozen check: same frames for ${stallTime}ms`);
+        console.log(`Stream frozen: same frames for ${stallTime}ms`);
 
-        if (stallTime > 5000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-          console.log('Stream appears frozen, attempting ICE restart');
-          await this.attemptIceRestart();
+        if (stallTime > 5000 && !this.isReconnecting) {
+          console.log('Stream frozen, attempting reconnection');
+          await this.fullReconnect();
         }
       } else {
         this.lastRemoteStreamTime = Date.now();
@@ -98,23 +102,90 @@ class WebRTCService {
   }
 
   private async attemptIceRestart() {
-    if (!this.pc) return;
+    if (!this.pc || this.isReconnecting) return;
 
     this.reconnectAttempts++;
     console.log(`ICE restart attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
 
     try {
       this.pc.restartIce();
-      await this.createOffer();
+      this.remoteDescriptionSet = false;
+      const offer = await this.pc.createOffer({ iceRestart: true });
+      await this.pc.setLocalDescription(offer);
+      signalingService.sendOffer(this.remoteDeviceId, offer);
       console.log('ICE restart offer sent');
     } catch (err) {
-      console.error('ICE restart failed:', err);
-
-      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-        console.log('Max reconnect attempts reached, tearing down');
-        this.onConnectionState?.('failed');
-      }
+      console.error('ICE restart failed, doing full reconnect:', err);
+      await this.fullReconnect();
     }
+  }
+
+  private async fullReconnect() {
+    if (this.isReconnecting) return;
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+    console.log(`Full reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      console.log('Max reconnect attempts reached');
+      this.isReconnecting = false;
+      this.onConnectionState?.('failed');
+      return;
+    }
+
+    this.clearTimers();
+
+    if (this.pc) {
+      try { this.pc.close(); } catch (e) {}
+      this.pc = null;
+    }
+
+    this.pendingCandidates = [];
+    this.remoteDescriptionSet = false;
+
+    try {
+      if (this.role === 'camera') {
+        await this.rebuildCameraConnection();
+      } else {
+        await this.rebuildMonitorConnection();
+      }
+      console.log('Full reconnect completed, waiting for connection...');
+    } catch (err) {
+      console.error('Full reconnect failed:', err);
+      this.isReconnecting = false;
+      this.onConnectionState?.('failed');
+    }
+  }
+
+  private async rebuildCameraConnection() {
+    const { RTCPeerConnection } = require('react-native-webrtc');
+
+    this.pc = new RTCPeerConnection(this.getConfiguration());
+    this.setupPeerConnection(this.pc);
+
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((track: any) => {
+        this.pc.addTrack(track, this.localStream);
+      });
+    }
+
+    this.remoteDescriptionSet = false;
+    const offer = await this.pc.createOffer();
+    await this.pc.setLocalDescription(offer);
+    signalingService.sendOffer(this.remoteDeviceId, offer);
+    console.log('New camera offer sent after full reconnect');
+
+    this.setupKeepalive();
+  }
+
+  private async rebuildMonitorConnection() {
+    const { RTCPeerConnection } = require('react-native-webrtc');
+
+    this.pc = new RTCPeerConnection(this.getConfiguration());
+    this.setupPeerConnection(this.pc);
+    this.setupKeepalive();
+
+    console.log('Monitor PC rebuilt, waiting for offer...');
   }
 
   private handleIceStateChange() {
@@ -127,7 +198,7 @@ class WebRTCService {
       case 'disconnected':
         console.log('ICE disconnected, waiting for recovery...');
         this.disconnectedTimer = setTimeout(async () => {
-          if (this.pc?.iceConnectionState === 'disconnected' && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (this.pc?.iceConnectionState === 'disconnected' && !this.isReconnecting) {
             console.log('ICE still disconnected after 3s, attempting restart');
             await this.attemptIceRestart();
           }
@@ -136,9 +207,8 @@ class WebRTCService {
 
       case 'failed':
         console.log('ICE connection failed');
-        this.onConnectionState?.('failed');
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.attemptIceRestart();
+        if (!this.isReconnecting) {
+          this.fullReconnect();
         }
         break;
 
@@ -149,6 +219,7 @@ class WebRTCService {
           this.disconnectedTimer = null;
         }
         this.reconnectAttempts = 0;
+        this.isReconnecting = false;
         this.lastRemoteStreamTime = Date.now();
         console.log('ICE connected/completed');
         break;
@@ -205,7 +276,7 @@ class WebRTCService {
       }
     };
 
-    console.log('Requesting getUserMedia with constraints:', JSON.stringify(constraints));
+    console.log('Requesting getUserMedia');
     this.localStream = await mediaDevices.getUserMedia(constraints);
     console.log('getUserMedia success, tracks:', this.localStream.getTracks().length);
     this.localStream.getTracks().forEach((track: any) => {
