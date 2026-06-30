@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { SignalingMessage } from '../types';
 
 const SERVER_URL = Platform.select({
-  android: 'wss://baby-monitor-signaling.onrender.com',
+  android: 'wss://baby-monitor-signaling-20xt.onrender.com',
   default: 'ws://localhost:8888'
 });
 
