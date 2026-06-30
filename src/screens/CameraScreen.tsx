@@ -58,13 +58,13 @@ export default function CameraScreen() {
     if (localStream && connectionState === 'connected' && !detectionStarted.current) {
       detectionStarted.current = true;
       setDetectionActive(true);
-      addLog('Iniciando detección de sonido...');
+      addLog('Iniciando detección...');
 
       const { webrtcService } = require('../services/webrtc');
       const pc = webrtcService.getPeerConnection();
       if (pc) {
         detectionService.start(pc, handleDetection);
-        addLog('Detección de sonido activa');
+        addLog('Detección activa (sonido + movimiento)');
       } else {
         addLog('WARN: PeerConnection no disponible aún');
       }

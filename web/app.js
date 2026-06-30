@@ -15,6 +15,11 @@ let audioContext = null;
 let analyser = null;
 let audioCheckInterval = null;
 let lastSoundAlert = 0;
+let motionCheckInterval = null;
+let lastMotionAlert = 0;
+let prevFrameData = null;
+let motionCanvas = null;
+let motionCtx = null;
 
 const iceServers = {
   iceServers: [
@@ -114,6 +119,7 @@ function createPeerConnection() {
     if (remoteVideo.srcObject !== remoteStream) {
       remoteVideo.srcObject = remoteStream;
       startAudioDetection(remoteStream);
+      startMotionDetection(remoteStream);
     }
   };
 
@@ -167,7 +173,9 @@ function handleSignalingMessage(message) {
       document.getElementById('waitingSubtext').textContent = 'Cámara desconectada. Esperando reconexión...';
       document.getElementById('streamStatus').textContent = 'Cámara desconectada';
       if (audioCheckInterval) { clearInterval(audioCheckInterval); audioCheckInterval = null; }
+      if (motionCheckInterval) { clearInterval(motionCheckInterval); motionCheckInterval = null; }
       if (audioContext) { audioContext.close(); audioContext = null; }
+      prevFrameData = null;
       break;
 
     case 'offer':
@@ -312,6 +320,66 @@ function startAudioDetection(stream) {
     }, 500);
   } catch (e) {
     console.error('Audio detection error:', e);
+  }
+}
+
+function startMotionDetection(stream) {
+  try {
+    motionCanvas = document.createElement('canvas');
+    motionCanvas.width = 160;
+    motionCanvas.height = 120;
+    motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+
+    const tempVideo = document.createElement('video');
+    tempVideo.srcObject = stream;
+    tempVideo.muted = true;
+    tempVideo.playsInline = true;
+    tempVideo.play().catch(() => {});
+
+    motionCheckInterval = setInterval(() => {
+      if (tempVideo.readyState < 2) return;
+
+      motionCtx.drawImage(tempVideo, 0, 0, 160, 120);
+      const currentFrame = motionCtx.getImageData(0, 0, 160, 120);
+
+      if (prevFrameData) {
+        let diffPixels = 0;
+        const totalPixels = currentFrame.data.length / 4;
+        const step = 16;
+
+        for (let i = 0; i < currentFrame.data.length; i += step * 4) {
+          const rDiff = Math.abs(currentFrame.data[i] - prevFrameData.data[i]);
+          const gDiff = Math.abs(currentFrame.data[i + 1] - prevFrameData.data[i + 1]);
+          const bDiff = Math.abs(currentFrame.data[i + 2] - prevFrameData.data[i + 2]);
+          if (rDiff + gDiff + bDiff > 60) diffPixels++;
+        }
+
+        const sampledPixels = totalPixels / step;
+        const changePercent = (diffPixels / sampledPixels) * 100;
+
+        console.log('Motion:', changePercent.toFixed(1) + '%');
+
+        if (changePercent > 15) {
+          const now = Date.now();
+          if (now - lastMotionAlert > 3000) {
+            lastMotionAlert = now;
+            sendSignaling({
+              type: 'alert',
+              deviceId: DEVICE_ID,
+              payload: {
+                type: 'motion',
+                message: `Movimiento detectado (${Math.round(changePercent)}%)`,
+                confidence: Math.min(100, Math.round(changePercent))
+              }
+            });
+          }
+        }
+      }
+
+      prevFrameData = currentFrame;
+    }, 1500);
+  } catch (e) {
+    console.error('Motion detection error:', e);
   }
 }
 
