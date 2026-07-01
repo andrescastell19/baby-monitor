@@ -3,16 +3,16 @@ import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeM
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import * as KeepAwake from 'expo-keep-awake';
-import { useWebRTC } from '../hooks/useWebRTC';
-import { useConnectionStore } from '../stores/connectionStore';
-import { detectionService } from '../services/detection';
-import { signalingService } from '../services/signaling';
+import { useInitialize } from '../ui/hooks/useInitialize';
+import { useAppStore } from '../infra/store/zustandStore';
+import { WebRTCDetectionAdapter } from '../adapters/detection/WebRTCDetectionAdapter';
+import { WebSocketSignalingAdapter } from '../adapters/signaling/WebSocketSignalingAdapter';
 
 export default function CameraScreen() {
-  const { localDevice } = useConnectionStore();
+  const { connection } = useAppStore();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
-  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors } = useWebRTC();
+  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors } = useInitialize();
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,22 +21,22 @@ export default function CameraScreen() {
   const [lastAlert, setLastAlert] = useState<string | null>(null);
   const detectionStarted = useRef(false);
 
-  const addLog = (msg: string) => {
+  const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-15), `${time} ${msg}`]);
-  };
+  }, []);
 
   useEffect(() => {
-    addLog(`localDevice: ${localDevice?.id || 'null'} (${localDevice?.role || 'null'})`);
+    addLog(`localDevice: ${connection.localDevice?.id || 'null'} (${connection.localDevice?.role || 'null'})`);
     addLog(`signaling: ${signalingStatus}`);
     addLog(`monitores: ${connectedMonitors.length}`);
-  }, [localDevice, signalingStatus, connectedMonitors]);
+  }, [connection.localDevice, signalingStatus, connectedMonitors, addLog]);
 
   useEffect(() => {
     if (connectedMonitors.length > 0) {
       addLog(`Monitor conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
     }
-  }, [connectedMonitors.length]);
+  }, [connectedMonitors.length, addLog]);
 
   useEffect(() => {
     if (connectionState === 'connected') {
@@ -58,7 +58,7 @@ export default function CameraScreen() {
     if (connectionState !== 'new') {
       addLog(`WebRTC state: ${connectionState}`);
     }
-  }, [connectionState]);
+  }, [connectionState, addLog]);
 
   useEffect(() => {
     return () => {
@@ -66,50 +66,19 @@ export default function CameraScreen() {
       if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
         NativeModules.BabyMonitor.stopService();
       }
-      detectionService.stop();
     };
   }, []);
-
-  const handleDetection = useCallback((event: any) => {
-    const msg = `[${event.type.toUpperCase()}] ${event.message}`;
-    addLog(msg);
-    setLastAlert(msg);
-    signalingService.sendAlert(event.type, event.message, event.confidence);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      detectionService.stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (localStream && connectionState === 'connected' && !detectionStarted.current) {
-      detectionStarted.current = true;
-      setDetectionActive(true);
-      addLog('Iniciando detección...');
-
-      const { webrtcService } = require('../services/webrtc');
-      const pc = webrtcService.getPeerConnection();
-      if (pc) {
-        detectionService.start(pc, handleDetection);
-        addLog('Detección activa (sonido + movimiento)');
-      } else {
-        addLog('WARN: PeerConnection no disponible aún');
-      }
-    }
-  }, [localStream, connectionState, handleDetection]);
 
   const startStreaming = async () => {
     setError(null);
     addLog('--- Iniciando transmisión ---');
 
-    if (!localDevice) {
+    if (!connection.localDevice) {
       setError('No hay device local. Vuelve atrás y selecciona un rol.');
       addLog('ERROR: localDevice null');
       return;
     }
-    addLog(`localDevice OK: ${localDevice.id}`);
+    addLog(`localDevice OK: ${connection.localDevice.id}`);
 
     if (signalingStatus !== 'connected') {
       setError(`Servidor signaling no conectado (estado: ${signalingStatus}). Verifica que el servidor esté corriendo.`);
@@ -130,7 +99,6 @@ export default function CameraScreen() {
       const fullMsg = `Error al iniciar cámara: ${msg}`;
       setError(fullMsg);
       addLog(`ERROR: ${fullMsg}`);
-      addLog(`ERROR stack: ${err?.stack || 'N/A'}`);
       console.error('Camera init error:', err);
     } finally {
       setIsConnecting(false);
@@ -209,8 +177,8 @@ export default function CameraScreen() {
           <Text style={styles.statusText}>
             {isStreaming ? 'Transmitiendo...' : isConnecting ? 'Conectando...' : connectionState === 'connected' ? 'Conectado' : 'Esperando conexión...'}
           </Text>
-          {localDevice && (
-            <Text style={styles.deviceText}>ID: {localDevice.id}</Text>
+          {connection.localDevice && (
+            <Text style={styles.deviceText}>ID: {connection.localDevice.id}</Text>
           )}
           {connectedMonitors.length > 0 ? (
             <Text style={styles.deviceText}>Monitores: {connectedMonitors.length} conectado{connectedMonitors.length > 1 ? 's' : ''}</Text>
@@ -238,150 +206,32 @@ export default function CameraScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  video: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  cameraPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-  },
-  placeholderText: {
-    fontSize: 64,
-  },
-  placeholderLabel: {
-    color: '#FFF',
-    fontSize: 18,
-    marginTop: 16,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-    padding: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 12,
-    borderRadius: 10,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  title: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  detectionBadge: {
-    backgroundColor: 'rgba(76,175,80,0.8)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  detectionBadgeText: {
-    fontSize: 12,
-  },
-  alertBanner: {
-    backgroundColor: 'rgba(255,87,34,0.9)',
-    padding: 10,
-    borderRadius: 8,
-  },
-  alertBannerText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  errorBox: {
-    backgroundColor: 'rgba(244,67,54,0.9)',
-    padding: 12,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: 'bold',
-  },
-  middleArea: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-  },
-  statusText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  deviceText: {
-    color: '#AAA',
-    fontSize: 10,
-    marginTop: 2,
-  },
-  streamButton: {
-    backgroundColor: '#4CAF50',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  streamButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  text: {
-    color: '#FFF',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: '#2196F3',
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  logBox: {
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    padding: 6,
-    borderRadius: 10,
-    maxHeight: 100,
-  },
-  logTitle: {
-    color: '#888',
-    fontSize: 10,
-    marginBottom: 4,
-  },
-  logScroll: {
-    flex: 1,
-  },
-  logText: {
-    color: '#0F0',
-    fontSize: 9,
-    fontFamily: 'monospace',
-    marginBottom: 1,
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  video: { flex: 1, width: '100%', height: '100%' },
+  cameraPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' },
+  placeholderText: { fontSize: 64 },
+  placeholderLabel: { color: '#FFF', fontSize: 18, marginTop: 16 },
+  overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', padding: 12 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', padding: 12, borderRadius: 10 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  title: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  statusDot: { width: 12, height: 12, borderRadius: 6 },
+  detectionBadge: { backgroundColor: 'rgba(76,175,80,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  detectionBadgeText: { fontSize: 12 },
+  alertBanner: { backgroundColor: 'rgba(255,87,34,0.9)', padding: 10, borderRadius: 8 },
+  alertBannerText: { color: '#FFF', fontSize: 13, fontWeight: 'bold', textAlign: 'center' },
+  errorBox: { backgroundColor: 'rgba(244,67,54,0.9)', padding: 12, borderRadius: 8 },
+  errorText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
+  middleArea: { backgroundColor: 'rgba(0,0,0,0.7)', padding: 12, borderRadius: 10, marginBottom: 8 },
+  statusText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  deviceText: { color: '#AAA', fontSize: 10, marginTop: 2 },
+  streamButton: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center' },
+  streamButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  text: { color: '#FFF', fontSize: 16, textAlign: 'center' },
+  button: { backgroundColor: '#2196F3', padding: 15, borderRadius: 8, marginTop: 20, alignItems: 'center' },
+  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  logBox: { backgroundColor: 'rgba(0,0,0,0.7)', padding: 6, borderRadius: 10, maxHeight: 100 },
+  logTitle: { color: '#888', fontSize: 10, marginBottom: 4 },
+  logScroll: { flex: 1 },
+  logText: { color: '#0F0', fontSize: 9, fontFamily: 'monospace', marginBottom: 1 },
 });

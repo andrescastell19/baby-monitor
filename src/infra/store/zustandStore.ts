@@ -1,17 +1,23 @@
 import { create } from 'zustand';
-import { ConnectionState, Device, DeviceRole, Alert } from '../types';
+import { Device } from '../../core/domain/Device';
+import { Alert } from '../../core/domain/Alert';
+import { DeviceRole, ConnectionStatus } from '../../types';
 
-interface ConnectionStore {
-  connection: ConnectionState;
+interface ConnectionState {
+  status: ConnectionStatus;
   localDevice: Device | null;
   remoteDevice: Device | null;
-  alerts: Alert[];
-  role: DeviceRole | null;
+  error: string | null;
+}
 
+interface AppStore {
+  connection: ConnectionState;
+  role: DeviceRole | null;
+  alerts: Alert[];
   setRole: (role: DeviceRole) => void;
   setLocalDevice: (device: Device) => void;
-  setRemoteDevice: (device: Device | null) => void;
-  setStatus: (status: ConnectionState['status']) => void;
+  setRemoteDevice: (device: Device) => void;
+  setStatus: (status: ConnectionStatus) => void;
   setError: (error: string | null) => void;
   addAlert: (alert: Alert) => void;
   markAlertAsRead: (id: number) => void;
@@ -19,31 +25,27 @@ interface ConnectionStore {
   reset: () => void;
 }
 
-const initialState: ConnectionState = {
+const initialConnection: ConnectionState = {
   status: 'disconnected',
   localDevice: null,
   remoteDevice: null,
   error: null,
 };
 
-export const useConnectionStore = create<ConnectionStore>((set) => ({
-  connection: initialState,
-  localDevice: null,
-  remoteDevice: null,
-  alerts: [],
+export const useAppStore = create<AppStore>((set) => ({
+  connection: initialConnection,
   role: null,
+  alerts: [],
 
   setRole: (role) => set({ role }),
 
   setLocalDevice: (device) =>
     set((state) => ({
-      localDevice: device,
       connection: { ...state.connection, localDevice: device },
     })),
 
   setRemoteDevice: (device) =>
     set((state) => ({
-      remoteDevice: device,
       connection: { ...state.connection, remoteDevice: device },
     })),
 
@@ -54,17 +56,26 @@ export const useConnectionStore = create<ConnectionStore>((set) => ({
 
   setError: (error) =>
     set((state) => ({
-      connection: { ...state.connection, error, status: error ? 'error' : state.connection.status },
+      connection: {
+        ...state.connection,
+        error,
+        status: error ? 'error' : state.connection.status,
+      },
     })),
 
-  addAlert: (alert) => set((state) => ({ alerts: [alert, ...state.alerts] })),
+  addAlert: (alert) =>
+    set((state) => ({
+      alerts: [alert, ...state.alerts],
+    })),
 
   markAlertAsRead: (id) =>
     set((state) => ({
-      alerts: state.alerts.map((a) => (a.id === id ? { ...a, read: true } : a)),
+      alerts: state.alerts.map((a) =>
+        a.id === id ? { ...a, read: true } : a
+      ),
     })),
 
   clearAlerts: () => set({ alerts: [] }),
 
-  reset: () => set({ connection: initialState, localDevice: null, remoteDevice: null, alerts: [], role: null }),
+  reset: () => set({ connection: initialConnection, role: null, alerts: [] }),
 }));

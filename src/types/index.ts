@@ -1,4 +1,5 @@
 export type DeviceRole = 'camera' | 'monitor';
+export type DevicePlatform = 'android' | 'web';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -17,23 +18,11 @@ export interface ConnectionState {
 }
 
 export interface Alert {
-  id: string;
+  id: number;
   type: 'sound' | 'motion';
   timestamp: number;
   message: string;
   read: boolean;
-}
-
-export interface CameraSettings {
-  facing: 'front' | 'back';
-  enabled: boolean;
-  audioEnabled: boolean;
-}
-
-export interface MonitorSettings {
-  volume: number;
-  brightness: number;
-  alertsEnabled: boolean;
 }
 
 export interface SDPMessage {
@@ -50,12 +39,14 @@ export interface AlertPayload {
 
 export interface RegisterPayload {
   role: DeviceRole;
+  platform?: DevicePlatform;
 }
 
 export interface SignalingMessage {
-  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect' | 'alert' | 'camera-online' | 'camera-offline' | 'monitor-online' | 'monitor-offline' | 'ping' | 'pong' | 'renegotiate';
+  type: 'register' | 'offer' | 'answer' | 'candidate' | 'disconnect' | 'alert' | 'camera-online' | 'camera-offline' | 'monitor-online' | 'monitor-offline' | 'ping' | 'pong' | 'renegotiate' | 'frame';
   deviceId: string;
   targetDeviceId?: string;
   role?: DeviceRole;
-  payload?: SDPMessage | AlertPayload | RegisterPayload;
+  platform?: DevicePlatform;
+  payload?: SDPMessage | AlertPayload | RegisterPayload | string;
 }

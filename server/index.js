@@ -54,15 +54,15 @@ function handleWsConnection(ws) {
 
       switch (message.type) {
         case 'register': {
-          devices.set(message.deviceId, { ws, role: message.role, lastPong: Date.now() });
-          console.log(`Device registered: ${message.deviceId} (${message.role})`);
-          console.log('All devices:', Array.from(devices.entries()).map(([id, d]) => ({ id, role: d.role })));
+          devices.set(message.deviceId, { ws, role: message.role, platform: message.platform || 'android', lastPong: Date.now() });
+          console.log(`Device registered: ${message.deviceId} (${message.role}, ${message.platform || 'android'})`);
+          console.log('All devices:', Array.from(devices.entries()).map(([id, d]) => ({ id, role: d.role, platform: d.platform })));
 
           if (message.role === 'camera') {
             broadcastToMonitors({ type: 'camera-online', deviceId: message.deviceId });
             for (const [id, device] of devices) {
               if (device.role === 'monitor') {
-                ws.send(JSON.stringify({ type: 'monitor-online', deviceId: id }));
+                ws.send(JSON.stringify({ type: 'monitor-online', deviceId: id, platform: device.platform }));
               }
             }
           }
@@ -73,7 +73,7 @@ function handleWsConnection(ws) {
                 ws.send(JSON.stringify({ type: 'camera-online', deviceId: id }));
               }
             }
-            broadcastToCameras({ type: 'monitor-online', deviceId: message.deviceId });
+            broadcastToCameras({ type: 'monitor-online', deviceId: message.deviceId, platform: message.platform || 'android' });
           }
           break;
         }
@@ -107,6 +107,15 @@ function handleWsConnection(ws) {
             }));
           } else {
             console.log(`No target for ${message.type} from ${message.deviceId}`);
+          }
+          break;
+        }
+
+        case 'frame': {
+          for (const [id, device] of devices) {
+            if (device.role === 'monitor' && device.platform === 'web') {
+              try { device.ws.send(JSON.stringify({ type: 'frame', deviceId: message.deviceId, payload: message.payload })); } catch (e) {}
+            }
           }
           break;
         }

@@ -59,7 +59,7 @@ export function useWebRTC() {
             const alertPayload = message.payload as AlertPayload;
             console.log('Alert received:', alertPayload.type, alertPayload.message);
             addAlert({
-              id: Date.now().toString(),
+              id: Date.now(),
               type: alertPayload.type,
               timestamp: Date.now(),
               message: alertPayload.message,

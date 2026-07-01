@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useConnectionStore } from '../stores/connectionStore';
+import { useAppStore } from '../infra/store/zustandStore';
+import { createDevice } from '../core/domain/Device';
 import { DeviceRole } from '../types';
 
 type RootStackParamList = {
@@ -15,7 +16,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Pairing'>;
 
 export default function PairingScreen() {
   const navigation = useNavigation<NavigationProp>();
-  const { setRole, setLocalDevice, setRemoteDevice } = useConnectionStore();
+  const { setRole, setLocalDevice, setRemoteDevice } = useAppStore();
   const [selectedRole, setSelectedRole] = useState<DeviceRole | null>(null);
 
   const handleStart = () => {
@@ -28,19 +29,21 @@ export default function PairingScreen() {
     const remoteId = selectedRole === 'camera' ? 'monitor-remote' : 'camera-remote';
 
     setRole(selectedRole);
-    setLocalDevice({
-      id: deviceId,
-      name: selectedRole === 'camera' ? 'Cámara del bebé' : 'Monitor',
-      role: selectedRole,
-      isOnline: true,
-    });
+    setLocalDevice(createDevice(
+      deviceId,
+      selectedRole === 'camera' ? 'Cámara del bebé' : 'Monitor',
+      selectedRole,
+      'android',
+      true
+    ));
 
-    setRemoteDevice({
-      id: remoteId,
-      name: selectedRole === 'camera' ? 'Monitor' : 'Cámara del bebé',
-      role: selectedRole === 'camera' ? 'monitor' : 'camera',
-      isOnline: true,
-    });
+    setRemoteDevice(createDevice(
+      remoteId,
+      selectedRole === 'camera' ? 'Monitor' : 'Cámara del bebé',
+      selectedRole === 'camera' ? 'monitor' : 'camera',
+      'android',
+      true
+    ));
 
     if (selectedRole === 'camera') {
       navigation.navigate('Camera');
