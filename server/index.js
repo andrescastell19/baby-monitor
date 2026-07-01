@@ -60,6 +60,11 @@ function handleWsConnection(ws) {
 
           if (message.role === 'camera') {
             broadcastToMonitors({ type: 'camera-online', deviceId: message.deviceId });
+            for (const [id, device] of devices) {
+              if (device.role === 'monitor') {
+                ws.send(JSON.stringify({ type: 'monitor-online', deviceId: id }));
+              }
+            }
           }
 
           if (message.role === 'monitor') {

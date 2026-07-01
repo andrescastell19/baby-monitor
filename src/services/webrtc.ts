@@ -28,6 +28,7 @@ class WebRTCService {
   private frozenCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   private peerConnections: Map<string, PeerConnectionEntry> = new Map();
+  private pendingMonitors: string[] = [];
 
   private getConfiguration() {
     return {
@@ -222,12 +223,29 @@ class WebRTCService {
     console.log('getUserMedia success, tracks:', this.localStream.getTracks().length);
     this.onRemoteStream?.(this.localStream);
     this.setupTimers();
+
+    if (this.pendingMonitors.length > 0) {
+      console.log(`Processing ${this.pendingMonitors.length} queued monitors`);
+      const monitors = [...this.pendingMonitors];
+      this.pendingMonitors = [];
+      for (const monitorId of monitors) {
+        await this.addMonitor(monitorId);
+      }
+    }
   }
 
   async addMonitor(monitorId: string) {
     if (this.role !== 'camera') return;
     if (this.peerConnections.has(monitorId)) {
       console.log(`Monitor ${monitorId} already has a PC, skipping`);
+      return;
+    }
+
+    if (!this.localStream) {
+      console.log(`LocalStream not ready, queuing monitor: ${monitorId}`);
+      if (!this.pendingMonitors.includes(monitorId)) {
+        this.pendingMonitors.push(monitorId);
+      }
       return;
     }
 
