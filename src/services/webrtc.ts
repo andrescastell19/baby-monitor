@@ -67,8 +67,15 @@ class WebRTCService {
 
     pc.onicecandidate = (event: any) => {
       if (event.candidate) {
+        const c = event.candidate.candidate || '';
+        const type = c.includes('typ relay') ? 'RELAY' : c.includes('typ srflx') ? 'SRFLX' : 'HOST';
+        console.log(`ICE candidate [${type}] [${monitorId}]:`, c.substring(0, 120));
         signalingService.sendCandidate(monitorId, event.candidate);
       }
+    };
+
+    pc.onicegatheringstatechange = () => {
+      console.log(`ICE gathering [${monitorId}]:`, pc.iceGatheringState);
     };
 
     pc.oniceconnectionstatechange = () => {
@@ -135,8 +142,9 @@ class WebRTCService {
 
     try {
       const { RTCPeerConnection } = require('react-native-webrtc');
-      const pc = new RTCPeerConnection(this.getConfiguration());
-      entry.pc = pc;
+    const pc = new RTCPeerConnection(this.getConfiguration());
+    console.log(`PC created [${monitorId}], iceServers:`, JSON.stringify(this.getConfiguration().iceServers.map(s => s.urls)));
+    entry.pc = pc;
       this.setupPeerConnectionForMonitor(pc, monitorId);
 
       if (this.localStream) {

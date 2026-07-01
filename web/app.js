@@ -23,6 +23,7 @@ let motionCtx = null;
 let lastVideoWidth = 0;
 let lastVideoHeight = 0;
 let videoStallCheckInterval = null;
+let candidateCount = { host: 0, srflx: 0, relay: 0 };
 
 const iceConfig = {
   iceServers: [
@@ -115,6 +116,7 @@ function register() {
 function createPeerConnection() {
   const config = useRelayConfig ? iceConfigRelay : iceConfig;
   console.log('Creating PeerConnection with', useRelayConfig ? 'RELAY-ONLY' : 'ALL', 'ICE config');
+  candidateCount = { host: 0, srflx: 0, relay: 0 };
   pc = new RTCPeerConnection(config);
   remoteDescriptionSet = false;
   pendingCandidates = [];
@@ -134,7 +136,7 @@ function createPeerConnection() {
         }
       });
     } else {
-      console.log('ICE gathering complete');
+      console.log('ICE gathering complete. Candidates from camera:', candidateCount);
     }
   };
 
@@ -298,6 +300,8 @@ function handleSignalingMessage(message) {
       if (message.payload?.candidate) {
         const c = message.payload.candidate.candidate || '';
         const type = c.includes('typ relay') ? 'RELAY' : c.includes('typ srflx') ? 'SRFLX' : 'HOST';
+        candidateCount[type.toLowerCase()]++;
+        console.log(`Received candidate [${type}] from camera (${candidateCount.host}H/${candidateCount.srflx}S/${candidateCount.relay}R):`, c.substring(0, 120));
         if (pc && remoteDescriptionSet) {
           console.log(`Adding ICE candidate directly [${type}]`);
           pc.addIceCandidate(new RTCIceCandidate(message.payload.candidate));
