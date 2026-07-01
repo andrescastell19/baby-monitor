@@ -68,6 +68,7 @@ function handleWsConnection(ws) {
                 ws.send(JSON.stringify({ type: 'camera-online', deviceId: id }));
               }
             }
+            broadcastToCameras({ type: 'monitor-online', deviceId: message.deviceId });
           }
           break;
         }
@@ -163,6 +164,9 @@ function handleWsConnection(ws) {
         if (role === 'camera') {
           broadcastToMonitors({ type: 'camera-offline', deviceId: id });
         }
+        if (role === 'monitor') {
+          broadcastToCameras({ type: 'monitor-offline', deviceId: id });
+        }
         break;
       }
     }
@@ -172,6 +176,14 @@ function handleWsConnection(ws) {
 function broadcastToMonitors(message) {
   for (const [id, device] of devices) {
     if (device.role === 'monitor') {
+      try { device.ws.send(JSON.stringify(message)); } catch (e) {}
+    }
+  }
+}
+
+function broadcastToCameras(message) {
+  for (const [id, device] of devices) {
+    if (device.role === 'camera') {
       try { device.ws.send(JSON.stringify(message)); } catch (e) {}
     }
   }
@@ -197,6 +209,9 @@ const heartbeatInterval = setInterval(() => {
       devices.delete(id);
       if (device.role === 'camera') {
         broadcastToMonitors({ type: 'camera-offline', deviceId: id });
+      }
+      if (device.role === 'monitor') {
+        broadcastToCameras({ type: 'monitor-offline', deviceId: id });
       }
     }
   }

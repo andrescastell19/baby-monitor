@@ -6,7 +6,7 @@ import { useWebRTC } from '../hooks/useWebRTC';
 import { Alert } from '../types';
 
 export default function MonitorScreen() {
-  const { connection, remoteDevice, alerts, markAlertAsRead, localDevice } = useConnectionStore();
+  const { connection, alerts, markAlertAsRead, localDevice } = useConnectionStore();
   const { remoteStream, connectionState, initializeAsMonitor, muteAudio, unmuteAudio, signalingStatus } = useWebRTC();
   const [isMuted, setIsMuted] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -19,12 +19,11 @@ export default function MonitorScreen() {
 
   useEffect(() => {
     addLog(`localDevice: ${localDevice?.id || 'null'} (${localDevice?.role || 'null'})`);
-    addLog(`remoteDevice: ${remoteDevice?.id || 'null'} (${remoteDevice?.role || 'null'})`);
     addLog(`signaling: ${signalingStatus}`);
-  }, [localDevice, remoteDevice, signalingStatus]);
+  }, [localDevice, signalingStatus]);
 
   useEffect(() => {
-    if (localDevice && remoteDevice) {
+    if (localDevice) {
       addLog('Inicializando monitor...');
       initializeAsMonitor().then(() => {
         addLog('initializeAsMonitor completado');
@@ -32,7 +31,7 @@ export default function MonitorScreen() {
         addLog(`ERROR init: ${err?.message || String(err)}`);
       });
     }
-  }, [localDevice, remoteDevice]);
+  }, [localDevice]);
 
   useEffect(() => {
     if (connectionState !== 'new') {
@@ -96,9 +95,6 @@ export default function MonitorScreen() {
             <Text style={styles.videoText}>
               {connectionState === 'connected' ? 'Conectado' : 'Esperando cámara...'}
             </Text>
-            {remoteDevice && (
-              <Text style={styles.deviceText}>{remoteDevice.name}</Text>
-            )}
           </View>
         )}
       </View>

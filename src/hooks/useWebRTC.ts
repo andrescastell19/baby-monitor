@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
 import { webrtcService } from '../services/webrtc';
 import { signalingService } from '../services/signaling';
 import { useConnectionStore } from '../stores/connectionStore';
@@ -10,7 +9,8 @@ export function useWebRTC() {
   const [localStream, setLocalStream] = useState<any>(null);
   const [connectionState, setConnectionState] = useState<string>('new');
   const [signalingStatus, setSignalingStatus] = useState<string>('disconnected');
-  const { setStatus, setError, localDevice, remoteDevice, addAlert } = useConnectionStore();
+  const [connectedMonitors, setConnectedMonitors] = useState<string[]>([]);
+  const { setStatus, setError, localDevice, addAlert } = useConnectionStore();
   const signalingConnected = useRef(false);
   const isInitialized = useRef(false);
 
@@ -22,7 +22,7 @@ export function useWebRTC() {
           const sdp = (message.payload as SDPMessage)?.sdp;
           if (sdp) {
             console.log('Handling WebRTC offer from:', message.deviceId);
-            await webrtcService.handleOffer(sdp);
+            await webrtcService.handleOffer(sdp, message.deviceId);
           }
           break;
         }
@@ -30,7 +30,7 @@ export function useWebRTC() {
           const sdp = (message.payload as SDPMessage)?.sdp;
           if (sdp) {
             console.log('Handling WebRTC answer from:', message.deviceId);
-            await webrtcService.handleAnswer(sdp);
+            await webrtcService.handleAnswer(sdp, message.deviceId);
           }
           break;
         }
@@ -38,8 +38,20 @@ export function useWebRTC() {
           const candidate = (message.payload as SDPMessage)?.candidate;
           if (candidate) {
             console.log('Handling ICE candidate from:', message.deviceId);
-            await webrtcService.handleCandidate(candidate);
+            await webrtcService.handleCandidate(candidate, message.deviceId);
           }
+          break;
+        }
+        case 'monitor-online': {
+          console.log('Monitor online:', message.deviceId);
+          await webrtcService.addMonitor(message.deviceId);
+          setConnectedMonitors(webrtcService.getConnectedMonitors());
+          break;
+        }
+        case 'monitor-offline': {
+          console.log('Monitor offline:', message.deviceId);
+          webrtcService.removeMonitor(message.deviceId);
+          setConnectedMonitors(webrtcService.getConnectedMonitors());
           break;
         }
         case 'alert':
@@ -63,7 +75,7 @@ export function useWebRTC() {
           break;
         case 'renegotiate':
           console.log('Renegotiate requested by remote');
-          webrtcService.handleRenegotiate();
+          webrtcService.handleRenegotiate(message.deviceId);
           break;
       }
     } catch (err) {
@@ -111,16 +123,16 @@ export function useWebRTC() {
   }, [localDevice, handleSignalingMessage, handleStatus, handleReconnect]);
 
   const initializeAsCamera = useCallback(async () => {
-    if (!localDevice || !remoteDevice) {
+    if (!localDevice) {
       throw new Error('Faltan datos de dispositivos. Asegúrate de haber seleccionado un rol.');
     }
 
-    console.log('Initializing camera:', localDevice.id, '->', remoteDevice.id);
+    console.log('Initializing camera:', localDevice.id);
     isInitialized.current = true;
 
     await webrtcService.initializeAsCamera(
       localDevice.id,
-      remoteDevice.id,
+      '',
       (stream) => {
         console.log('Local stream received');
         setLocalStream(stream);
@@ -136,6 +148,9 @@ export function useWebRTC() {
         } else if (state === 'disconnected') {
           setStatus('connecting');
         }
+      },
+      (monitors) => {
+        setConnectedMonitors(monitors);
       }
     );
 
@@ -143,21 +158,19 @@ export function useWebRTC() {
     if (local) {
       setLocalStream(local);
     }
-
-    await webrtcService.createOffer();
-  }, [localDevice, remoteDevice, setStatus, setError]);
+  }, [localDevice, setStatus, setError]);
 
   const initializeAsMonitor = useCallback(async () => {
-    if (!localDevice || !remoteDevice) {
+    if (!localDevice) {
       throw new Error('Faltan datos de dispositivos. Asegúrate de haber seleccionado un rol.');
     }
 
-    console.log('Initializing monitor:', localDevice.id, '->', remoteDevice.id);
+    console.log('Initializing monitor:', localDevice.id);
     isInitialized.current = true;
 
     await webrtcService.initializeAsMonitor(
       localDevice.id,
-      remoteDevice.id,
+      '',
       (stream) => {
         console.log('Remote stream received');
         setRemoteStream(stream);
@@ -174,7 +187,7 @@ export function useWebRTC() {
         }
       }
     );
-  }, [localDevice, remoteDevice, setStatus, setError]);
+  }, [localDevice, setStatus, setError]);
 
   const muteAudio = useCallback(() => {
     webrtcService.muteAudio();
@@ -194,6 +207,7 @@ export function useWebRTC() {
     localStream,
     connectionState,
     signalingStatus,
+    connectedMonitors,
     initializeAsCamera,
     initializeAsMonitor,
     muteAudio,

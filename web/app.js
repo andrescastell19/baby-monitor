@@ -573,4 +573,3 @@ btnScreenshot.addEventListener('click', takeScreenshot);
 btnFullscreen.addEventListener('click', toggleFullscreen);
 
 renderAlerts();
-connectSignaling();

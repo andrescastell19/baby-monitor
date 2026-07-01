@@ -9,10 +9,10 @@ import { detectionService } from '../services/detection';
 import { signalingService } from '../services/signaling';
 
 export default function CameraScreen() {
-  const { localDevice, remoteDevice } = useConnectionStore();
+  const { localDevice } = useConnectionStore();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
-  const { localStream, connectionState, initializeAsCamera, signalingStatus } = useWebRTC();
+  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors } = useWebRTC();
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +28,15 @@ export default function CameraScreen() {
 
   useEffect(() => {
     addLog(`localDevice: ${localDevice?.id || 'null'} (${localDevice?.role || 'null'})`);
-    addLog(`remoteDevice: ${remoteDevice?.id || 'null'} (${remoteDevice?.role || 'null'})`);
     addLog(`signaling: ${signalingStatus}`);
-  }, [localDevice, remoteDevice, signalingStatus]);
+    addLog(`monitores: ${connectedMonitors.length}`);
+  }, [localDevice, signalingStatus, connectedMonitors]);
+
+  useEffect(() => {
+    if (connectedMonitors.length > 0) {
+      addLog(`Monitor conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
+    }
+  }, [connectedMonitors.length]);
 
   useEffect(() => {
     if (connectionState === 'connected') {
@@ -105,15 +111,8 @@ export default function CameraScreen() {
     }
     addLog(`localDevice OK: ${localDevice.id}`);
 
-    if (!remoteDevice) {
-      setError('No hay device remoto. Asegúrate de tener el dashboard web abierto.');
-      addLog('ERROR: remoteDevice null');
-      return;
-    }
-    addLog(`remoteDevice OK: ${remoteDevice.id}`);
-
     if (signalingStatus !== 'connected') {
-      setError(`Servidor signaling no conectado (estado: ${signalingStatus}). Verifica que node server/index.js esté corriendo.`);
+      setError(`Servidor signaling no conectado (estado: ${signalingStatus}). Verifica que el servidor esté corriendo.`);
       addLog(`ERROR: signaling not connected (${signalingStatus})`);
       return;
     }
@@ -213,8 +212,10 @@ export default function CameraScreen() {
           {localDevice && (
             <Text style={styles.deviceText}>ID: {localDevice.id}</Text>
           )}
-          {remoteDevice && (
-            <Text style={styles.deviceText}>Remoto: {remoteDevice.id}</Text>
+          {connectedMonitors.length > 0 ? (
+            <Text style={styles.deviceText}>Monitores: {connectedMonitors.length} conectado{connectedMonitors.length > 1 ? 's' : ''}</Text>
+          ) : (
+            <Text style={styles.deviceText}>Esperando monitores...</Text>
           )}
           {!isStreaming && !isConnecting && (
             <TouchableOpacity style={styles.streamButton} onPress={startStreaming}>
