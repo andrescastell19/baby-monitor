@@ -63,7 +63,7 @@ export function useWebRTC() {
           break;
         case 'renegotiate':
           console.log('Renegotiate requested by remote');
-          webrtcService.renegotiate();
+          webrtcService.handleRenegotiate();
           break;
       }
     } catch (err) {
@@ -85,8 +85,14 @@ export function useWebRTC() {
 
   const handleReconnect = useCallback(() => {
     if (isInitialized.current) {
-      console.log('Signaling reconnected, renegotiating WebRTC...');
-      webrtcService.renegotiate();
+      const pc = webrtcService.getPeerConnection();
+      const state = pc?.connectionState;
+      if (state === 'connected' || state === 'completed') {
+        console.log('Signaling reconnected but PC is connected, skipping renegotiate');
+      } else {
+        console.log('Signaling reconnected and PC is', state, 'renegotiating...');
+        webrtcService.renegotiate();
+      }
     }
   }, []);
 

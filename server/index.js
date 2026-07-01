@@ -111,6 +111,22 @@ function handleWsConnection(ws) {
           break;
         }
 
+        case 'renegotiate': {
+          let target = devices.get(message.targetDeviceId);
+          if (!target) {
+            for (const [id, device] of devices) {
+              if (device.ws !== ws) {
+                target = device;
+                break;
+              }
+            }
+          }
+          if (target) {
+            target.ws.send(JSON.stringify({ type: 'renegotiate', deviceId: message.deviceId }));
+          }
+          break;
+        }
+
         case 'ping': {
           let target = devices.get(message.targetDeviceId);
           if (target) {

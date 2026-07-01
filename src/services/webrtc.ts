@@ -100,7 +100,6 @@ class WebRTCService {
       this.lastFramesReceived = framesReceived;
     } catch (err) {
       console.warn('getStats failed (network may have changed):', err);
-      await this.fullReconnect();
     }
   }
 
@@ -329,7 +328,42 @@ class WebRTCService {
 
   async renegotiate() {
     console.log('Renegotiating after signaling reconnect');
-    await this.fullReconnect();
+
+    if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'completed')) {
+      console.log('PC is connected, creating new offer on existing PC');
+      try {
+        this.remoteDescriptionSet = false;
+        const offer = await this.pc.createOffer();
+        await this.pc.setLocalDescription(offer);
+        signalingService.sendOffer(this.remoteDeviceId, offer);
+        console.log('New offer sent on existing PC');
+      } catch (err) {
+        console.warn('Failed to create offer on existing PC, doing full reconnect:', err);
+        await this.fullReconnect();
+      }
+    } else {
+      console.log('PC is not connected, doing full reconnect');
+      await this.fullReconnect();
+    }
+  }
+
+  async handleRenegotiate() {
+    console.log('Renegotiate requested by remote');
+    if (this.pc && (this.pc.connectionState === 'connected' || this.pc.connectionState === 'completed')) {
+      try {
+        this.remoteDescriptionSet = false;
+        const offer = await this.pc.createOffer();
+        await this.pc.setLocalDescription(offer);
+        signalingService.sendOffer(this.remoteDeviceId, offer);
+        console.log('New offer sent in response to renegotiate');
+      } catch (err) {
+        console.warn('Failed to create renegotiate offer, doing full reconnect:', err);
+        await this.fullReconnect();
+      }
+    } else {
+      console.log('PC not connected during renegotiate, doing full reconnect');
+      await this.fullReconnect();
+    }
   }
 
   async handleOffer(sdp: any) {

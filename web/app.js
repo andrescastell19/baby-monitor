@@ -185,7 +185,13 @@ function requestNewOffer() {
   if (!CAMERA_DEVICE_ID || !ws || ws.readyState !== WebSocket.OPEN) return;
   if (reconnecting) return;
   reconnecting = true;
-  console.log('Web: video frozen, closing PC and waiting for camera to re-offer');
+  console.log('Web: requesting renegotiate from camera');
+
+  sendSignaling({
+    type: 'renegotiate',
+    deviceId: DEVICE_ID,
+    targetDeviceId: CAMERA_DEVICE_ID,
+  });
 
   if (pc) {
     try { pc.close(); } catch (e) {}
@@ -457,9 +463,12 @@ function startVideoStallDetection(stream) {
   const stallCtx = stallCanvas.getContext('2d', { willReadFrequently: true });
   let lastStallCheck = Date.now();
   let lastPixelHash = '';
+  const startTime = Date.now();
 
   videoStallCheckInterval = setInterval(() => {
     if (remoteVideo.readyState < 2 || !pc || pc.connectionState !== 'connected') return;
+
+    if (Date.now() - startTime < 8000) return;
 
     try {
       stallCtx.drawImage(remoteVideo, 0, 0, 64, 48);
