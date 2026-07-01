@@ -52,6 +52,12 @@ function handleWsConnection(ws) {
     try {
       const message = JSON.parse(data.toString());
 
+      const senderEntry = Array.from(devices.entries()).find(([_, d]) => d.ws === ws);
+      if (senderEntry) {
+        senderEntry[1].lastPong = Date.now();
+        ws.isAlive = true;
+      }
+
       switch (message.type) {
         case 'register': {
           devices.set(message.deviceId, { ws, role: message.role, platform: message.platform || 'android', lastPong: Date.now() });
