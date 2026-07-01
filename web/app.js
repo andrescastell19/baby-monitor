@@ -24,17 +24,32 @@ let lastVideoWidth = 0;
 let lastVideoHeight = 0;
 let videoStallCheckInterval = null;
 
-const iceServers = {
+const iceConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
     { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
+  iceCandidatePoolSize: 2,
+  bundlePolicy: 'max-bundle',
 };
+
+const iceConfigRelay = {
+  iceServers: [
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+  iceTransportPolicy: 'relay',
+  iceCandidatePoolSize: 2,
+};
+
+let useRelayConfig = false;
 
 const remoteVideo = document.getElementById('remoteVideo');
 const videoOverlay = document.getElementById('videoOverlay');
@@ -98,13 +113,17 @@ function register() {
 }
 
 function createPeerConnection() {
-  pc = new RTCPeerConnection(iceServers);
+  const config = useRelayConfig ? iceConfigRelay : iceConfig;
+  console.log('Creating PeerConnection with', useRelayConfig ? 'RELAY-ONLY' : 'ALL', 'ICE config');
+  pc = new RTCPeerConnection(config);
   remoteDescriptionSet = false;
   pendingCandidates = [];
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      console.log('Sending ICE candidate:', event.candidate.candidate?.substring(0, 60));
+      const c = event.candidate.candidate || '';
+      const type = c.includes('typ relay') ? 'RELAY' : c.includes('typ srflx') ? 'SRFLX' : 'HOST';
+      console.log(`Sending ICE candidate [${type}]:`, c.substring(0, 80));
       sendSignaling({
         type: 'candidate',
         deviceId: DEVICE_ID,
@@ -117,6 +136,10 @@ function createPeerConnection() {
     } else {
       console.log('ICE gathering complete');
     }
+  };
+
+  pc.onicegatheringstatechange = () => {
+    console.log('ICE gathering state:', pc.iceGatheringState);
   };
 
   pc.ontrack = (event) => {
@@ -155,13 +178,35 @@ function createPeerConnection() {
     }
   };
 
+let iceCheckingTimer = null;
+
   pc.oniceconnectionstatechange = () => {
-    console.log('ICE connection state:', pc.iceConnectionState);
-    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+    const iceState = pc.iceConnectionState;
+    console.log('ICE connection state:', iceState);
+
+    if (iceCheckingTimer) { clearTimeout(iceCheckingTimer); iceCheckingTimer = null; }
+
+    if (iceState === 'connected' || iceState === 'completed') {
       videoOverlay.classList.add('hidden');
       streamStatus.textContent = 'Recibiendo transmisión';
       remoteVideo.play().catch(() => {});
-    } else if (pc.iceConnectionState === 'disconnected') {
+      useRelayConfig = false;
+    } else if (iceState === 'checking') {
+      iceCheckingTimer = setTimeout(() => {
+        if (pc && pc.iceConnectionState === 'checking') {
+          console.log('ICE stuck at checking for 10s, retrying with RELAY-ONLY config');
+          streamStatus.textContent = 'Intentando conexión relay...';
+          useRelayConfig = true;
+          pc.close();
+          pc = null;
+          remoteDescriptionSet = false;
+          pendingCandidates = [];
+          if (CAMERA_DEVICE_ID && ws && ws.readyState === WebSocket.OPEN) {
+            sendSignaling({ type: 'renegotiate', deviceId: DEVICE_ID, targetDeviceId: CAMERA_DEVICE_ID });
+          }
+        }
+      }, 10000);
+    } else if (iceState === 'disconnected') {
       streamStatus.textContent = 'ICE desconectado - reconectando...';
       if (CAMERA_DEVICE_ID) {
         setTimeout(() => {
@@ -170,7 +215,7 @@ function createPeerConnection() {
           }
         }, 3000);
       }
-    } else if (pc.iceConnectionState === 'failed') {
+    } else if (iceState === 'failed') {
       streamStatus.textContent = 'ICE fallido - reconectando...';
       if (CAMERA_DEVICE_ID) {
         setTimeout(() => requestNewOffer(), 2000);
@@ -251,11 +296,13 @@ function handleSignalingMessage(message) {
 
     case 'candidate':
       if (message.payload?.candidate) {
+        const c = message.payload.candidate.candidate || '';
+        const type = c.includes('typ relay') ? 'RELAY' : c.includes('typ srflx') ? 'SRFLX' : 'HOST';
         if (pc && remoteDescriptionSet) {
-          console.log('Adding ICE candidate directly');
+          console.log(`Adding ICE candidate directly [${type}]`);
           pc.addIceCandidate(new RTCIceCandidate(message.payload.candidate));
         } else {
-          console.log('Queuing ICE candidate (remoteDescription not set yet)');
+          console.log(`Queuing ICE candidate [${type}] (pc=${!!pc}, remoteDescSet=${remoteDescriptionSet})`);
           pendingCandidates.push(message.payload.candidate);
         }
       }
