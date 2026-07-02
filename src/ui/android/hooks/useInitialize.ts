@@ -122,7 +122,7 @@ export function useInitialize() {
       useCase.execute(
         localDevice.id,
         remoteDevice.id,
-        () => {},
+        (stream: MediaStream) => setRemoteStream(stream),
         (state: string) => setConnectionState(state)
       );
     }
