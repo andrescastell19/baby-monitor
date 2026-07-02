@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeModules } from 'react-native';
-import { useCameraPermissions, useMicrophonePermissions, CameraView } from 'expo-camera';
+import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
+import ViewShot from 'react-native-view-shot';
 import * as KeepAwake from 'expo-keep-awake';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
@@ -18,7 +19,7 @@ export default function CameraScreen() {
   const [logs, setLogs] = useState<string[]>([]);
   const [detectionActive, setDetectionActive] = useState(false);
   const [lastAlert, setLastAlert] = useState<string | null>(null);
-  const cameraRef = useRef<any>(null);
+  const viewShotRef = useRef<any>(null);
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addLog = useCallback((msg: string) => {
@@ -26,25 +27,33 @@ export default function CameraScreen() {
     setLogs(prev => [...prev.slice(-15), `${time} ${msg}`]);
   }, []);
 
+  const captureFrame = useCallback(async () => {
+    if (!viewShotRef.current) return;
+    try {
+      const uri = await viewShotRef.current.capture({
+        format: 'jpg',
+        quality: FRAME_QUALITY,
+      });
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64data = (reader.result as string).split(',')[1];
+        if (base64data) {
+          sendFrame(base64data);
+        }
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      // Silently retry
+    }
+  }, [sendFrame]);
+
   const startFrameCapture = useCallback(() => {
     if (frameIntervalRef.current) return;
-    frameIntervalRef.current = setInterval(async () => {
-      if (!cameraRef.current) return;
-      try {
-        const photo = await cameraRef.current.takePictureAsync({
-          base64: true,
-          quality: FRAME_QUALITY,
-          skipProcessing: true,
-        });
-        if (photo?.base64) {
-          sendFrame(photo.base64);
-        }
-      } catch (err) {
-        // Silently retry
-      }
-    }, FRAME_CAPTURE_INTERVAL);
-    addLog(`Frame capture iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
-  }, [sendFrame, addLog]);
+    frameIntervalRef.current = setInterval(captureFrame, FRAME_CAPTURE_INTERVAL);
+    addLog(`Frame capture Relay iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
+  }, [captureFrame, addLog]);
 
   const stopFrameCapture = useCallback(() => {
     if (frameIntervalRef.current) {
@@ -56,14 +65,17 @@ export default function CameraScreen() {
   useEffect(() => {
     addLog(`localDevice: ${connection.localDevice?.id || 'null'} (${connection.localDevice?.role || 'null'})`);
     addLog(`signaling: ${signalingStatus}`);
-    addLog(`monitores: ${connectedMonitors.length}`);
+    addLog(`monitores web: ${connectedMonitors.length}`);
   }, [connection.localDevice, signalingStatus, connectedMonitors, addLog]);
 
   useEffect(() => {
-    if (connectedMonitors.length > 0) {
-      addLog(`Monitor conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
+    if (connectedMonitors.length > 0 && localStream) {
+      addLog(`Monitor web conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
+      startFrameCapture();
+    } else {
+      stopFrameCapture();
     }
-  }, [connectedMonitors.length, addLog]);
+  }, [connectedMonitors.length, localStream, addLog, startFrameCapture, stopFrameCapture]);
 
   useEffect(() => {
     if (connectionState === 'connected') {
@@ -75,20 +87,17 @@ export default function CameraScreen() {
         NativeModules.BabyMonitor.startService();
         addLog('Foreground service iniciado');
       }
-      startFrameCapture();
     } else if (connectionState === 'failed') {
       setIsStreaming(false);
-      stopFrameCapture();
       addLog('WebRTC FALLIDO - intentando reconectar...');
     } else if (connectionState === 'disconnected') {
       setIsStreaming(false);
-      stopFrameCapture();
       addLog('WebRTC DESCONECTADO - reconectando...');
     }
     if (connectionState !== 'new') {
       addLog(`WebRTC state: ${connectionState}`);
     }
-  }, [connectionState, addLog, startFrameCapture, stopFrameCapture]);
+  }, [connectionState, addLog]);
 
   useEffect(() => {
     return () => {
@@ -163,23 +172,16 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        mode="picture"
-      />
-
-      {localStream && (
-        <RTCView
-          streamURL={localStream.toURL()}
-          style={styles.video}
-          objectFit="cover"
-          mirror={false}
-        />
-      )}
-
-      {!localStream && (
+      {localStream ? (
+        <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: FRAME_QUALITY }} style={styles.video}>
+          <RTCView
+            streamURL={localStream.toURL()}
+            style={styles.video}
+            objectFit="cover"
+            mirror={false}
+          />
+        </ViewShot>
+      ) : (
         <View style={styles.cameraPlaceholder}>
           <Text style={styles.placeholderText}>📷</Text>
           <Text style={styles.placeholderLabel}>Cámara inicializando...</Text>
