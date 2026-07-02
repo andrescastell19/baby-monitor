@@ -19,6 +19,7 @@ export function useInitialize() {
   const signalingRef = useRef<WebSocketSignalingAdapter | null>(null);
   const webrtcStreamRef = useRef<WebRTCStreamAdapter | null>(null);
   const relayStreamRef = useRef<WebSocketRelayAdapter | null>(null);
+  const initializedRef = useRef(false);
 
   const handleSignalingMessage = useCallback((message: SignalingMessage) => {
     const webrtcStream = webrtcStreamRef.current;
@@ -67,7 +68,13 @@ export function useInitialize() {
     }
   }, [connection.localDevice?.id]);
 
-  const initializeAsCamera = useCallback(async () => {
+  useEffect(() => {
+    if (initializedRef.current) return;
+    const localDevice = connection.localDevice;
+    if (!localDevice) return;
+
+    initializedRef.current = true;
+
     const signaling = new WebSocketSignalingAdapter();
     const webrtcStream = new WebRTCStreamAdapter(signaling);
     const relayStream = new WebSocketRelayAdapter(signaling);
@@ -81,17 +88,20 @@ export function useInitialize() {
       setSignalingStatus(status);
       setStatus(status);
     });
-    signaling.onReconnect(() => {
-      if (connectionState === 'connected') {
-        // Reconnect handled by adapters
-      }
-    });
+    signaling.onReconnect(() => {});
+
+    webrtcStream.setDeviceId(localDevice.id);
+    relayStream.setDeviceId(localDevice.id);
+
+    signaling.connect(localDevice.id, 'camera', 'android');
+  }, [connection.localDevice?.id]);
+
+  const initializeAsCamera = useCallback(async () => {
+    const signaling = signalingRef.current;
+    const webrtcStream = webrtcStreamRef.current;
+    if (!signaling || !webrtcStream) return;
 
     const localDevice = connection.localDevice;
-    if (localDevice) {
-      webrtcStream.setDeviceId(localDevice.id);
-      relayStream.setDeviceId(localDevice.id);
-    }
 
     const useCase = new InitializeCamera(signaling, webrtcStream);
     await useCase.execute(
@@ -100,7 +110,7 @@ export function useInitialize() {
       (state: string) => setConnectionState(state),
       (monitors: string[]) => setConnectedMonitors(monitors)
     );
-  }, [connection.localDevice, connectionState, handleSignalingMessage, setStatus]);
+  }, [connection.localDevice, handleSignalingMessage, setStatus]);
 
   const initializeAsMonitor = useCallback(async () => {
     const signaling = new WebSocketSignalingAdapter();

@@ -3,9 +3,8 @@ services:
     name: baby-monitor-signaling
     runtime: node
     plan: free
-    rootDir: src/infra/server
-    buildCommand: npm install
-    startCommand: node index.js
+    buildCommand: cd src/infra/server && npm install
+    startCommand: cd src/infra/server && node index.js
     envVars:
       - key: NODE_ENV
         value: production

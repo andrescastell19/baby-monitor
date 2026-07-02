@@ -17,8 +17,6 @@ export class InitializeCamera {
     this.stream.onConnectionState(onConnectionState);
     this.stream.onMonitorsChange(onMonitorsChange);
 
-    this.signaling.connect(deviceId, 'camera', 'android');
-
     const { mediaDevices } = require('react-native-webrtc');
     const constraints = {
       audio: true,
