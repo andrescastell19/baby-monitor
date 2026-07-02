@@ -87,7 +87,7 @@ export function useInitialize() {
       setRemoteStream(stream);
     });
 
-    signaling.connect(localDevice.id, 'camera', 'android');
+    signaling.connect(localDevice.id, localDevice.role || 'camera', 'android');
   }, [connection.localDevice?.id]);
 
   const initializeAsCamera = useCallback(async (stream: MediaStream) => {
@@ -110,32 +110,14 @@ export function useInitialize() {
   }, [connection.localDevice]);
 
   const initializeAsMonitor = useCallback(async () => {
-    const signaling = new WebSocketSignalingAdapter();
-    const webrtcStream = new WebRTCStreamAdapter(signaling);
-
-    signalingRef.current = signaling;
-    webrtcStreamRef.current = webrtcStream;
-
-    signaling.onMessage(handleSignalingMessage);
-    signaling.onStatus((status: ConnectionStatus) => {
-      setSignalingStatus(status);
-      setStatus(status);
-    });
-    signaling.onReconnect(() => {});
-
-    webrtcStream.onConnectionState((state: string) => {
-      setConnectionState(state);
-    });
-    webrtcStream.onRemoteStream((stream: MediaStream) => {
-      setRemoteStream(stream);
-    });
+    const signaling = signalingRef.current;
+    const webrtcStream = webrtcStreamRef.current;
+    if (!signaling || !webrtcStream) return;
 
     const localDevice = connection.localDevice;
     const remoteDevice = connection.remoteDevice;
 
     if (localDevice && remoteDevice) {
-      signaling.connect(localDevice.id, 'monitor', 'android');
-
       const useCase = new InitializeMonitor(signaling, webrtcStream);
       useCase.execute(
         localDevice.id,
@@ -144,7 +126,7 @@ export function useInitialize() {
         (state: string) => setConnectionState(state)
       );
     }
-  }, [connection.localDevice, connection.remoteDevice, handleSignalingMessage, setStatus]);
+  }, [connection.localDevice, connection.remoteDevice]);
 
   const disconnect = useCallback(() => {
     signalingRef.current?.disconnect();

@@ -278,8 +278,27 @@ export class WebRTCStreamAdapter implements StreamPort {
   }
 
   async handleOffer(sdp: any, fromDeviceId: string): Promise<void> {
-    const entry = this.peerConnections.get(fromDeviceId);
-    if (!entry || !entry.pc) return;
+    let entry = this.peerConnections.get(fromDeviceId);
+    if (!entry || !entry.pc) {
+      const { RTCPeerConnection } = require('react-native-webrtc');
+      const newEntry: PeerConnectionEntry = {
+        pc: null,
+        platform: 'android',
+        lastFramesReceived: 0,
+        lastRemoteStreamTime: Date.now(),
+        pendingCandidates: [],
+        remoteDescriptionSet: false,
+        reconnectAttempts: 0,
+        isReconnecting: false,
+      };
+      const pc = new RTCPeerConnection(iceConfig);
+      newEntry.pc = pc;
+      this.peerConnections.set(fromDeviceId, newEntry);
+      this.setupPeerConnection(pc, fromDeviceId);
+      this.setupTimers();
+      entry = newEntry;
+      console.log(`PC created on-the-fly for ${fromDeviceId}`);
+    }
 
     const { RTCSessionDescription } = require('react-native-webrtc');
 
