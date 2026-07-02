@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeModules } from 'react-native';
-import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { RTCView } from 'react-native-webrtc';
-import ViewShot from 'react-native-view-shot';
+import { useCameraPermissions, useMicrophonePermissions, CameraView } from 'expo-camera';
 import * as KeepAwake from 'expo-keep-awake';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
@@ -12,14 +10,14 @@ export default function CameraScreen() {
   const { connection } = useAppStore();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
-  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors, sendFrame } = useInitialize();
+  const { connectionState, initializeAsCamera, signalingStatus, connectedMonitors, sendFrame } = useInitialize();
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [detectionActive, setDetectionActive] = useState(false);
   const [lastAlert, setLastAlert] = useState<string | null>(null);
-  const viewShotRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
   const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addLog = useCallback((msg: string) => {
@@ -28,31 +26,25 @@ export default function CameraScreen() {
   }, []);
 
   const captureFrame = useCallback(async () => {
-    if (!viewShotRef.current) return;
+    if (!cameraRef.current) return;
     try {
-      const uri = await viewShotRef.current.capture({
-        format: 'jpg',
+      const photo = await cameraRef.current.takePictureAsync({
+        base64: true,
         quality: FRAME_QUALITY,
+        skipProcessing: true,
       });
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64data = (reader.result as string).split(',')[1];
-        if (base64data) {
-          sendFrame(base64data);
-        }
-      };
-      reader.readAsDataURL(blob);
+      if (photo?.base64) {
+        sendFrame(photo.base64);
+      }
     } catch (err) {
-      // Silently retry
+      // Camera not ready yet, retry next interval
     }
   }, [sendFrame]);
 
   const startFrameCapture = useCallback(() => {
     if (frameIntervalRef.current) return;
     frameIntervalRef.current = setInterval(captureFrame, FRAME_CAPTURE_INTERVAL);
-    addLog(`Frame capture Relay iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
+    addLog(`Frame capture iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
   }, [captureFrame, addLog]);
 
   const stopFrameCapture = useCallback(() => {
@@ -65,17 +57,17 @@ export default function CameraScreen() {
   useEffect(() => {
     addLog(`localDevice: ${connection.localDevice?.id || 'null'} (${connection.localDevice?.role || 'null'})`);
     addLog(`signaling: ${signalingStatus}`);
-    addLog(`monitores web: ${connectedMonitors.length}`);
+    addLog(`monitores: ${connectedMonitors.length}`);
   }, [connection.localDevice, signalingStatus, connectedMonitors, addLog]);
 
   useEffect(() => {
-    if (connectedMonitors.length > 0 && localStream) {
-      addLog(`Monitor web conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
+    if (connectedMonitors.length > 0 && isStreaming) {
+      addLog(`Monitor conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
       startFrameCapture();
-    } else {
+    } else if (connectedMonitors.length === 0) {
       stopFrameCapture();
     }
-  }, [connectedMonitors.length, localStream, addLog, startFrameCapture, stopFrameCapture]);
+  }, [connectedMonitors.length, isStreaming, addLog, startFrameCapture, stopFrameCapture]);
 
   useEffect(() => {
     if (connectionState === 'connected') {
@@ -89,15 +81,17 @@ export default function CameraScreen() {
       }
     } else if (connectionState === 'failed') {
       setIsStreaming(false);
+      stopFrameCapture();
       addLog('WebRTC FALLIDO - intentando reconectar...');
     } else if (connectionState === 'disconnected') {
       setIsStreaming(false);
+      stopFrameCapture();
       addLog('WebRTC DESCONECTADO - reconectando...');
     }
     if (connectionState !== 'new') {
       addLog(`WebRTC state: ${connectionState}`);
     }
-  }, [connectionState, addLog]);
+  }, [connectionState, addLog, startFrameCapture, stopFrameCapture]);
 
   useEffect(() => {
     return () => {
@@ -132,7 +126,6 @@ export default function CameraScreen() {
       addLog('Llamando initializeAsCamera...');
       await initializeAsCamera();
       addLog('initializeAsCamera completado');
-      addLog(`localStream: ${localStream ? 'OK' : 'null'}`);
       addLog(`connectionState: ${connectionState}`);
     } catch (err: any) {
       const msg = err?.message || String(err);
@@ -172,21 +165,12 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {localStream ? (
-        <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: FRAME_QUALITY }} style={styles.video}>
-          <RTCView
-            streamURL={localStream.toURL()}
-            style={styles.video}
-            objectFit="cover"
-            mirror={false}
-          />
-        </ViewShot>
-      ) : (
-        <View style={styles.cameraPlaceholder}>
-          <Text style={styles.placeholderText}>📷</Text>
-          <Text style={styles.placeholderLabel}>Cámara inicializando...</Text>
-        </View>
-      )}
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing="back"
+        mode="picture"
+      />
 
       <View style={styles.overlay}>
         <View style={styles.header}>
@@ -249,10 +233,7 @@ export default function CameraScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  video: { flex: 1, width: '100%', height: '100%' },
-  cameraPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' },
-  placeholderText: { fontSize: 64 },
-  placeholderLabel: { color: '#FFF', fontSize: 18, marginTop: 16 },
+  camera: { ...StyleSheet.absoluteFillObject },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', padding: 12 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', padding: 12, borderRadius: 10 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },

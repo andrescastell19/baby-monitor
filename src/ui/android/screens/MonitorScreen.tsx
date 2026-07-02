@@ -1,15 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView } from 'react-native';
-import { RTCView } from 'react-native-webrtc';
+import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView, Image } from 'react-native';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
 import { Alert } from '../../../core/domain/Alert';
 
 export default function MonitorScreen() {
   const { connection, alerts, markAlertAsRead } = useAppStore();
-  const { remoteStream, connectionState, initializeAsMonitor, signalingStatus, muteAudio, unmuteAudio } = useInitialize();
+  const { currentFrame, connectionState, initializeAsMonitor, signalingStatus, sendFrame } = useInitialize();
   const [isConnected, setIsConnected] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
 
   const addLog = useCallback((msg: string) => {
@@ -32,37 +30,28 @@ export default function MonitorScreen() {
   useEffect(() => {
     if (connectionState === 'connected') {
       setIsConnected(true);
-      addLog('WebRTC CONECTADO');
+      addLog('Conectado');
     } else if (connectionState === 'disconnected') {
       setIsConnected(false);
-      addLog('WebRTC DESCONECTADO');
+      addLog('Desconectado');
     }
     if (connectionState !== 'new') {
-      addLog(`WebRTC state: ${connectionState}`);
+      addLog(`State: ${connectionState}`);
     }
   }, [connectionState, addLog]);
 
   useEffect(() => {
-    if (remoteStream) {
-      addLog('Stream remoto recibido');
+    if (currentFrame) {
+      addLog('Frame recibido');
     }
-  }, [remoteStream, addLog]);
-
-  const toggleMute = () => {
-    if (isMuted) {
-      unmuteAudio();
-    } else {
-      muteAudio();
-    }
-    setIsMuted(!isMuted);
-  };
+  }, [currentFrame, addLog]);
 
   const renderAlert = ({ item }: { item: Alert }) => (
     <View style={styles.alertItem}>
       <View style={[styles.alertDot, { backgroundColor: item.type === 'sound' ? '#F44336' : '#FF9800' }]} />
       <View style={styles.alertContent}>
         <Text style={styles.alertType}>
-          {item.type === 'sound' ? '🔊 Sonido detectado' : '👋 Movimiento detectado'}
+          {item.type === 'sound' ? 'Sonido detectado' : 'Movimiento detectado'}
         </Text>
         <Text style={styles.alertTime}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
       </View>
@@ -72,17 +61,17 @@ export default function MonitorScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.videoContainer}>
-        {remoteStream ? (
-          <RTCView
-            streamURL={remoteStream.toURL()}
+        {currentFrame ? (
+          <Image
+            source={{ uri: `data:image/jpeg;base64,${currentFrame}` }}
             style={styles.video}
-            objectFit="cover"
+            resizeMode="cover"
           />
         ) : (
           <View style={styles.placeholder}>
             <Text style={styles.placeholderText}>📺</Text>
             <Text style={styles.placeholderLabel}>
-              {isConnected ? 'Conectado, esperando video...' : 'Esperando conexión con cámara...'}
+              {isConnected ? 'Conectado, esperando video...' : 'Esperando conexion con camara...'}
             </Text>
           </View>
         )}
@@ -95,12 +84,6 @@ export default function MonitorScreen() {
             <Text key={i} style={styles.logText}>{log}</Text>
           ))}
         </ScrollView>
-      </View>
-
-      <View style={styles.controls}>
-        <TouchableOpacity style={[styles.controlButton, isMuted && styles.controlButtonActive]} onPress={toggleMute}>
-          <Text style={styles.controlButtonText}>{isMuted ? '🔇 Unmute' : '🔊 Sonido'}</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.alertsSection}>
@@ -130,10 +113,6 @@ const styles = StyleSheet.create({
   logTitle: { color: '#888', fontSize: 10, marginBottom: 4 },
   logScroll: { flex: 1 },
   logText: { color: '#0F0', fontSize: 9, fontFamily: 'monospace', marginBottom: 1 },
-  controls: { flexDirection: 'row', justifyContent: 'center', padding: 8, gap: 12 },
-  controlButton: { backgroundColor: '#2d2d44', padding: 12, borderRadius: 8, minWidth: 100, alignItems: 'center' },
-  controlButtonActive: { backgroundColor: '#F44336' },
-  controlButtonText: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
   alertsSection: { flex: 1, padding: 8 },
   alertsHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   alertsTitle: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },

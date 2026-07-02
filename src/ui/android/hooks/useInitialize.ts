@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MediaStream } from 'react-native-webrtc';
 import { WebSocketSignalingAdapter } from '../../../adapters/signaling/WebSocketSignalingAdapter';
-import { WebRTCStreamAdapter } from '../../../adapters/streaming/WebRTCStreamAdapter';
 import { WebSocketRelayAdapter } from '../../../adapters/streaming/WebSocketRelayAdapter';
 import { InitializeCamera } from '../../../core/usecases/InitializeCamera';
 import { InitializeMonitor } from '../../../core/usecases/InitializeMonitor';
@@ -9,55 +7,29 @@ import { useAppStore } from '../../../infra/store/zustandStore';
 import { SignalingMessage, ConnectionStatus } from '../../../types';
 
 export function useInitialize() {
-  const { connection, setLocalDevice, setStatus, setRemoteDevice } = useAppStore();
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<any>(null);
+  const { connection, setStatus } = useAppStore();
+  const [currentFrame, setCurrentFrame] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<string>('new');
   const [signalingStatus, setSignalingStatus] = useState<string>('disconnected');
   const [connectedMonitors, setConnectedMonitors] = useState<string[]>([]);
 
   const signalingRef = useRef<WebSocketSignalingAdapter | null>(null);
-  const webrtcStreamRef = useRef<WebRTCStreamAdapter | null>(null);
   const relayStreamRef = useRef<WebSocketRelayAdapter | null>(null);
   const initializedRef = useRef(false);
 
   const handleSignalingMessage = useCallback((message: SignalingMessage) => {
-    const webrtcStream = webrtcStreamRef.current;
     const relayStream = relayStreamRef.current;
 
     switch (message.type) {
-      case 'offer':
-        if (message.payload && typeof message.payload === 'object' && 'sdp' in message.payload) {
-          webrtcStream?.handleOffer(message.payload.sdp, message.deviceId);
-        }
-        break;
-      case 'answer':
-        if (message.payload && typeof message.payload === 'object' && 'sdp' in message.payload) {
-          webrtcStream?.handleAnswer(message.payload.sdp, message.deviceId);
-        }
-        break;
-      case 'candidate':
-        if (message.payload && typeof message.payload === 'object' && 'candidate' in message.payload) {
-          webrtcStream?.handleCandidate(message.payload.candidate, message.deviceId);
-        }
-        break;
       case 'monitor-online':
-        if (message.platform === 'web') {
-          relayStream?.addMonitor(message.deviceId, 'web');
-        } else {
-          webrtcStream?.addMonitor(message.deviceId, message.platform || 'android');
-        }
+        relayStream?.addMonitor(message.deviceId, message.platform || 'android');
         break;
       case 'monitor-offline':
-        webrtcStream?.removeMonitor(message.deviceId);
         relayStream?.removeMonitor(message.deviceId);
         break;
-      case 'renegotiate':
-        webrtcStream?.handleRenegotiate(message.deviceId);
-        break;
       case 'frame':
-        if (relayStream && typeof message.payload === 'string') {
-          relayStream.handleFrame(message.payload);
+        if (typeof message.payload === 'string') {
+          setCurrentFrame(message.payload);
         }
         break;
       case 'alert':
@@ -76,11 +48,9 @@ export function useInitialize() {
     initializedRef.current = true;
 
     const signaling = new WebSocketSignalingAdapter();
-    const webrtcStream = new WebRTCStreamAdapter(signaling);
     const relayStream = new WebSocketRelayAdapter(signaling);
 
     signalingRef.current = signaling;
-    webrtcStreamRef.current = webrtcStream;
     relayStreamRef.current = relayStream;
 
     signaling.onMessage(handleSignalingMessage);
@@ -90,7 +60,6 @@ export function useInitialize() {
     });
     signaling.onReconnect(() => {});
 
-    webrtcStream.setDeviceId(localDevice.id);
     relayStream.setDeviceId(localDevice.id);
 
     signaling.connect(localDevice.id, 'camera', 'android');
@@ -98,15 +67,14 @@ export function useInitialize() {
 
   const initializeAsCamera = useCallback(async () => {
     const signaling = signalingRef.current;
-    const webrtcStream = webrtcStreamRef.current;
-    if (!signaling || !webrtcStream) return;
+    const relayStream = relayStreamRef.current;
+    if (!signaling || !relayStream) return;
 
     const localDevice = connection.localDevice;
 
-    const useCase = new InitializeCamera(signaling, webrtcStream);
+    const useCase = new InitializeCamera(signaling, relayStream);
     await useCase.execute(
       localDevice?.id || '',
-      (stream: MediaStream) => setLocalStream(stream),
       (state: string) => setConnectionState(state),
       (monitors: string[]) => setConnectedMonitors(monitors)
     );
@@ -114,10 +82,10 @@ export function useInitialize() {
 
   const initializeAsMonitor = useCallback(async () => {
     const signaling = new WebSocketSignalingAdapter();
-    const webrtcStream = new WebRTCStreamAdapter(signaling);
+    const relayStream = new WebSocketRelayAdapter(signaling);
 
     signalingRef.current = signaling;
-    webrtcStreamRef.current = webrtcStream;
+    relayStreamRef.current = relayStream;
 
     signaling.onMessage(handleSignalingMessage);
     signaling.onStatus((status: ConnectionStatus) => {
@@ -126,30 +94,23 @@ export function useInitialize() {
     });
     signaling.onReconnect(() => {});
 
-    webrtcStream.onRemoteStream((stream: MediaStream) => setRemoteStream(stream));
-    webrtcStream.onConnectionState((state: string) => setConnectionState(state));
+    relayStream.onRemoteStream((frame: string) => setCurrentFrame(frame));
 
     const localDevice = connection.localDevice;
     const remoteDevice = connection.remoteDevice;
 
     if (localDevice && remoteDevice) {
-      const useCase = new InitializeMonitor(signaling, webrtcStream);
+      signaling.connect(localDevice.id, 'monitor', 'android');
+
+      const useCase = new InitializeMonitor(signaling, relayStream);
       useCase.execute(
         localDevice.id,
         remoteDevice.id,
-        (stream: MediaStream) => setRemoteStream(stream),
+        (frame: string) => setCurrentFrame(frame),
         (state: string) => setConnectionState(state)
       );
     }
   }, [connection.localDevice, connection.remoteDevice, handleSignalingMessage, setStatus]);
-
-  const muteAudio = useCallback(() => {
-    webrtcStreamRef.current?.muteAudio();
-  }, []);
-
-  const unmuteAudio = useCallback(() => {
-    webrtcStreamRef.current?.unmuteAudio();
-  }, []);
 
   const sendFrame = useCallback((base64: string) => {
     relayStreamRef.current?.sendFrame(base64);
@@ -157,8 +118,6 @@ export function useInitialize() {
 
   const disconnect = useCallback(() => {
     signalingRef.current?.disconnect();
-    webrtcStreamRef.current?.stopSending();
-    relayStreamRef.current?.stopSending();
   }, []);
 
   useEffect(() => {
@@ -168,15 +127,12 @@ export function useInitialize() {
   }, [disconnect]);
 
   return {
-    localStream,
-    remoteStream,
+    currentFrame,
     connectionState,
     signalingStatus,
     connectedMonitors,
     initializeAsCamera,
     initializeAsMonitor,
-    muteAudio,
-    unmuteAudio,
     sendFrame,
     disconnect,
   };

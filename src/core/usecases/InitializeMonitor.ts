@@ -15,9 +15,5 @@ export class InitializeMonitor {
   ): void {
     this.stream.onConnectionState(onConnectionState);
     this.stream.onRemoteStream(onRemoteStream);
-
-    this.signaling.connect(deviceId, 'monitor', 'android');
-
-    this.stream.startReceiving(remoteDeviceId);
   }
 }
