@@ -70,28 +70,10 @@ export default function CameraScreen() {
   }, [connectedMonitors.length, isStreaming, addLog, startFrameCapture, stopFrameCapture]);
 
   useEffect(() => {
-    if (connectionState === 'connected') {
-      setIsStreaming(true);
-      setIsConnecting(false);
-      addLog('WebRTC CONECTADO');
-      KeepAwake.activateKeepAwakeAsync().then(() => addLog('KeepAwake activado'));
-      if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
-        NativeModules.BabyMonitor.startService();
-        addLog('Foreground service iniciado');
-      }
-    } else if (connectionState === 'failed') {
-      setIsStreaming(false);
-      stopFrameCapture();
-      addLog('WebRTC FALLIDO - intentando reconectar...');
-    } else if (connectionState === 'disconnected') {
-      setIsStreaming(false);
-      stopFrameCapture();
-      addLog('WebRTC DESCONECTADO - reconectando...');
-    }
     if (connectionState !== 'new') {
-      addLog(`WebRTC state: ${connectionState}`);
+      addLog(`Connection state: ${connectionState}`);
     }
-  }, [connectionState, addLog, startFrameCapture, stopFrameCapture]);
+  }, [connectionState, addLog]);
 
   useEffect(() => {
     return () => {
@@ -126,7 +108,15 @@ export default function CameraScreen() {
       addLog('Llamando initializeAsCamera...');
       await initializeAsCamera();
       addLog('initializeAsCamera completado');
-      addLog(`connectionState: ${connectionState}`);
+
+      setIsStreaming(true);
+      setIsConnecting(false);
+      addLog('TRANSMISION INICIADA');
+      KeepAwake.activateKeepAwakeAsync().then(() => addLog('KeepAwake activado'));
+      if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
+        NativeModules.BabyMonitor.startService();
+        addLog('Foreground service iniciado');
+      }
     } catch (err: any) {
       const msg = err?.message || String(err);
       const fullMsg = `Error al iniciar cámara: ${msg}`;

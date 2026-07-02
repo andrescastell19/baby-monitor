@@ -14,7 +14,5 @@ export class InitializeCamera {
   ): Promise<void> {
     this.stream.onConnectionState(onConnectionState);
     this.stream.onMonitorsChange(onMonitorsChange);
-
-    this.signaling.connect(deviceId, 'camera', 'android');
   }
 }

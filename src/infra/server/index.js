@@ -118,6 +118,8 @@ function handleWsConnection(ws) {
         }
 
         case 'frame': {
+          const monitorCount = Array.from(devices.values()).filter(d => d.role === 'monitor' && d.platform === 'web').length;
+          console.log(`Frame from ${message.deviceId} → relaying to ${monitorCount} web monitor(s)`);
           for (const [id, device] of devices) {
             if (device.role === 'monitor' && device.platform === 'web') {
               try { device.ws.send(JSON.stringify({ type: 'frame', deviceId: message.deviceId, payload: message.payload })); } catch (e) {}

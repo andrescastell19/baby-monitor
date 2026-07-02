@@ -17,6 +17,7 @@ let lastMotionAlert = 0;
 let prevFrameData = null;
 let motionCanvas = null;
 let motionCtx = null;
+let keepAliveInterval = null;
 
 const remoteVideo = document.getElementById('remoteVideo');
 const videoOverlay = document.getElementById('videoOverlay');
@@ -46,6 +47,12 @@ function connectSignaling() {
     setStatus('connected', 'Conectado al servidor');
     signalingConnected = true;
     register();
+    if (keepAliveInterval) clearInterval(keepAliveInterval);
+    keepAliveInterval = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        sendSignaling({ type: 'ping', deviceId: DEVICE_ID });
+      }
+    }, 20000);
   };
 
   ws.onmessage = (event) => {
@@ -61,6 +68,7 @@ function connectSignaling() {
     setStatus('disconnected', 'Desconectado');
     signalingConnected = false;
     CAMERA_DEVICE_ID = null;
+    if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
     setTimeout(connectSignaling, 3000);
   };
 
