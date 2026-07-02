@@ -124,20 +124,22 @@ export class WebSocketSignalingAdapter implements SignalingPort {
   }
 
   sendOffer(targetDeviceId: string, sdp: any): void {
+    const sdpString = typeof sdp === 'string' ? sdp : (sdp.sdp || sdp);
     this.send({
       type: 'offer',
       deviceId: this.deviceId,
       targetDeviceId,
-      payload: { type: 'offer', sdp },
+      payload: { type: 'offer', sdp: sdpString },
     });
   }
 
   sendAnswer(targetDeviceId: string, sdp: any): void {
+    const sdpString = typeof sdp === 'string' ? sdp : (sdp.sdp || sdp);
     this.send({
       type: 'answer',
       deviceId: this.deviceId,
       targetDeviceId,
-      payload: { type: 'answer', sdp },
+      payload: { type: 'answer', sdp: sdpString },
     });
   }
 
