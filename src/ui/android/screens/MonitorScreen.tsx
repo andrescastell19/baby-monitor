@@ -41,6 +41,15 @@ export default function MonitorScreen() {
     }
   }, [connectionState, addLog]);
 
+  useEffect(() => {
+    if (remoteStream) {
+      console.log(`[MonitorScreen] remoteStream changed: videoTracks=${remoteStream.getVideoTracks().length} audioTracks=${remoteStream.getAudioTracks().length} id=${remoteStream.id}`);
+      addLog(`Stream recibido! video=${remoteStream.getVideoTracks().length} audio=${remoteStream.getAudioTracks().length}`);
+    } else {
+      console.log('[MonitorScreen] remoteStream is null');
+    }
+  }, [remoteStream, addLog]);
+
   const renderAlert = ({ item }: { item: Alert }) => (
     <View style={styles.alertItem}>
       <View style={[styles.alertDot, { backgroundColor: item.type === 'sound' ? '#F44336' : '#FF9800' }]} />

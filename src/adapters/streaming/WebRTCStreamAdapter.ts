@@ -91,9 +91,13 @@ export class WebRTCStreamAdapter implements StreamPort {
     };
 
     pc.ontrack = (event: any) => {
-      console.log('Remote track received:', event.track.kind);
+      console.log(`[WebRTC] ontrack: kind=${event.track.kind} enabled=${event.track.enabled} streams=${event.streams.length}`);
+      if (event.streams[0]) {
+        console.log(`[WebRTC] ontrack stream: id=${event.streams[0].id} videoTracks=${event.streams[0].getVideoTracks().length} audioTracks=${event.streams[0].getAudioTracks().length}`);
+      }
       this.remoteStream = event.streams[0];
       if (entry) entry.lastRemoteStreamTime = Date.now();
+      console.log(`[WebRTC] onRemoteStreamCallback exists: ${!!this.onRemoteStreamCallback}`);
       this.onRemoteStreamCallback?.(this.remoteStream!);
     };
 
@@ -193,16 +197,20 @@ export class WebRTCStreamAdapter implements StreamPort {
   }
 
   async addMonitor(monitorId: string, platform: MonitorPlatform): Promise<void> {
-    if (this.peerConnections.has(monitorId)) return;
+    if (this.peerConnections.has(monitorId)) {
+      console.log(`[WebRTC] addMonitor: ${monitorId} already exists, skipping`);
+      return;
+    }
 
     if (!this.localStream) {
+      console.log(`[WebRTC] addMonitor: no localStream yet, queuing ${monitorId}`);
       if (!this.pendingMonitors.includes(monitorId)) {
         this.pendingMonitors.push(monitorId);
       }
       return;
     }
 
-    console.log(`Adding monitor [WebRTC]: ${monitorId} (${platform})`);
+    console.log(`[WebRTC] addMonitor: ${monitorId} (${platform}) localStream tracks: video=${this.localStream.getVideoTracks().length} audio=${this.localStream.getAudioTracks().length}`);
 
     const { RTCPeerConnection } = require('react-native-webrtc');
 
@@ -229,9 +237,11 @@ export class WebRTCStreamAdapter implements StreamPort {
 
     try {
       const offer = await pc.createOffer();
+      console.log(`[WebRTC] Offer created for ${monitorId}: sdpLength=${offer.sdp?.length}`);
       await pc.setLocalDescription(offer);
+      console.log(`[WebRTC] setLocalDescription OK, sending offer to ${monitorId}`);
       this.signaling.sendOffer(monitorId, offer);
-      console.log(`Offer sent to monitor: ${monitorId}`);
+      console.log(`[WebRTC] Offer sent to ${monitorId}`);
       this.onMonitorsChangeCallback?.(Array.from(this.peerConnections.keys()));
     } catch (err) {
       console.error(`Failed to create offer for ${monitorId}:`, err);
@@ -278,6 +288,7 @@ export class WebRTCStreamAdapter implements StreamPort {
   }
 
   async handleOffer(sdp: any, fromDeviceId: string): Promise<void> {
+    console.log(`[WebRTC] handleOffer from=${fromDeviceId} sdpType=${sdp?.type} sdpLength=${sdp?.sdp?.length}`);
     let entry = this.peerConnections.get(fromDeviceId);
     if (!entry || !entry.pc) {
       const { RTCPeerConnection } = require('react-native-webrtc');
@@ -297,19 +308,24 @@ export class WebRTCStreamAdapter implements StreamPort {
       this.setupPeerConnection(pc, fromDeviceId);
       this.setupTimers();
       entry = newEntry;
-      console.log(`PC created on-the-fly for ${fromDeviceId}`);
+      console.log(`[WebRTC] PC created on-the-fly for ${fromDeviceId}`);
     }
 
     const { RTCSessionDescription } = require('react-native-webrtc');
 
     try {
+      console.log(`[WebRTC] setRemoteDescription for offer from=${fromDeviceId}`);
       entry.remoteDescriptionSet = false;
       await entry.pc.setRemoteDescription(new RTCSessionDescription(sdp));
       entry.remoteDescriptionSet = true;
+      console.log(`[WebRTC] setRemoteDescription OK, creating answer...`);
 
       const answer = await entry.pc.createAnswer();
+      console.log(`[WebRTC] Answer created: sdpLength=${answer.sdp?.length}`);
       await entry.pc.setLocalDescription(answer);
+      console.log(`[WebRTC] setLocalDescription OK, sending answer...`);
       this.signaling.sendAnswer(fromDeviceId, answer);
+      console.log(`[WebRTC] Answer sent to ${fromDeviceId}`);
 
       for (const c of entry.pendingCandidates) {
         try {
@@ -319,20 +335,26 @@ export class WebRTCStreamAdapter implements StreamPort {
       }
       entry.pendingCandidates = [];
     } catch (err) {
-      console.error(`Error handling offer from ${fromDeviceId}:`, err);
+      console.error(`[WebRTC] Error handling offer from ${fromDeviceId}:`, err);
     }
   }
 
   async handleAnswer(sdp: any, fromDeviceId: string): Promise<void> {
+    console.log(`[WebRTC] handleAnswer from=${fromDeviceId}`);
     const entry = this.peerConnections.get(fromDeviceId);
-    if (!entry || !entry.pc) return;
+    if (!entry || !entry.pc) {
+      console.log(`[WebRTC] handleAnswer: no PC found for ${fromDeviceId}`);
+      return;
+    }
 
     const { RTCSessionDescription } = require('react-native-webrtc');
 
     try {
+      console.log(`[WebRTC] setRemoteDescription for answer from=${fromDeviceId}`);
       entry.remoteDescriptionSet = false;
       await entry.pc.setRemoteDescription(new RTCSessionDescription(sdp));
       entry.remoteDescriptionSet = true;
+      console.log(`[WebRTC] setRemoteDescription OK, draining ${entry.pendingCandidates.length} pending candidates`);
 
       for (const c of entry.pendingCandidates) {
         try {
@@ -342,24 +364,29 @@ export class WebRTCStreamAdapter implements StreamPort {
       }
       entry.pendingCandidates = [];
     } catch (err) {
-      console.error(`Error handling answer from ${fromDeviceId}:`, err);
+      console.error(`[WebRTC] Error handling answer from ${fromDeviceId}:`, err);
     }
   }
 
   async handleCandidate(candidate: any, fromDeviceId: string): Promise<void> {
     const entry = this.peerConnections.get(fromDeviceId);
-    if (!entry || !entry.pc) return;
+    if (!entry || !entry.pc) {
+      console.log(`[WebRTC] handleCandidate: no PC for ${fromDeviceId}, discarding`);
+      return;
+    }
 
     if (!entry.remoteDescriptionSet) {
+      console.log(`[WebRTC] handleCandidate: remoteDesc not set yet, queuing (${entry.pendingCandidates.length + 1} pending)`);
       entry.pendingCandidates.push(candidate);
       return;
     }
 
     try {
       const { RTCIceCandidate } = require('react-native-webrtc');
+      console.log(`[WebRTC] addIceCandidate from=${fromDeviceId}`);
       await entry.pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
-      console.warn(`Failed to add ICE candidate [${fromDeviceId}]:`, e);
+      console.warn(`[WebRTC] Failed to add ICE candidate [${fromDeviceId}]:`, e);
     }
   }
 
