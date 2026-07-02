@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView, Image } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView } from 'react-native';
+import { RTCView } from 'react-native-webrtc';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
 import { Alert } from '../../../core/domain/Alert';
 
 export default function MonitorScreen() {
   const { connection, alerts, markAlertAsRead } = useAppStore();
-  const { currentFrame, connectionState, initializeAsMonitor, signalingStatus, sendFrame } = useInitialize();
+  const { remoteStream, connectionState, initializeAsMonitor, signalingStatus } = useInitialize();
   const [isConnected, setIsConnected] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
 
@@ -40,12 +41,6 @@ export default function MonitorScreen() {
     }
   }, [connectionState, addLog]);
 
-  useEffect(() => {
-    if (currentFrame) {
-      addLog('Frame recibido');
-    }
-  }, [currentFrame, addLog]);
-
   const renderAlert = ({ item }: { item: Alert }) => (
     <View style={styles.alertItem}>
       <View style={[styles.alertDot, { backgroundColor: item.type === 'sound' ? '#F44336' : '#FF9800' }]} />
@@ -61,11 +56,11 @@ export default function MonitorScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.videoContainer}>
-        {currentFrame ? (
-          <Image
-            source={{ uri: `data:image/jpeg;base64,${currentFrame}` }}
+        {remoteStream ? (
+          <RTCView
+            streamURL={remoteStream.toURL()}
             style={styles.video}
-            resizeMode="cover"
+            objectFit="cover"
           />
         ) : (
           <View style={styles.placeholder}>

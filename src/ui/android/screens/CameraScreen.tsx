@@ -1,57 +1,21 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeModules } from 'react-native';
-import { useCameraPermissions, useMicrophonePermissions, CameraView } from 'expo-camera';
+import { RTCView, mediaDevices } from 'react-native-webrtc';
 import * as KeepAwake from 'expo-keep-awake';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
-import { FRAME_CAPTURE_INTERVAL, FRAME_QUALITY } from '../../../core/config/ice';
 
 export default function CameraScreen() {
   const { connection } = useAppStore();
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
-  const { connectionState, initializeAsCamera, signalingStatus, connectedMonitors, sendFrame } = useInitialize();
+  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors } = useInitialize();
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [detectionActive, setDetectionActive] = useState(false);
-  const [lastAlert, setLastAlert] = useState<string | null>(null);
-  const cameraRef = useRef<any>(null);
-  const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-15), `${time} ${msg}`]);
-  }, []);
-
-  const captureFrame = useCallback(async () => {
-    if (!cameraRef.current) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: FRAME_QUALITY,
-        skipProcessing: true,
-      });
-      if (photo?.base64) {
-        sendFrame(photo.base64);
-      }
-    } catch (err) {
-      // Camera not ready yet, retry next interval
-    }
-  }, [sendFrame]);
-
-  const startFrameCapture = useCallback(() => {
-    if (frameIntervalRef.current) return;
-    frameIntervalRef.current = setInterval(captureFrame, FRAME_CAPTURE_INTERVAL);
-    addLog(`Frame capture iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
-  }, [captureFrame, addLog]);
-
-  const stopFrameCapture = useCallback(() => {
-    if (frameIntervalRef.current) {
-      clearInterval(frameIntervalRef.current);
-      frameIntervalRef.current = null;
-    }
   }, []);
 
   useEffect(() => {
@@ -61,15 +25,6 @@ export default function CameraScreen() {
   }, [connection.localDevice, signalingStatus, connectedMonitors, addLog]);
 
   useEffect(() => {
-    if (connectedMonitors.length > 0 && isStreaming) {
-      addLog(`Monitor conectado: ${connectedMonitors[connectedMonitors.length - 1]}`);
-      startFrameCapture();
-    } else if (connectedMonitors.length === 0) {
-      stopFrameCapture();
-    }
-  }, [connectedMonitors.length, isStreaming, addLog, startFrameCapture, stopFrameCapture]);
-
-  useEffect(() => {
     if (connectionState !== 'new') {
       addLog(`Connection state: ${connectionState}`);
     }
@@ -77,13 +32,12 @@ export default function CameraScreen() {
 
   useEffect(() => {
     return () => {
-      stopFrameCapture();
       KeepAwake.deactivateKeepAwake();
       if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
         NativeModules.BabyMonitor.stopService();
       }
     };
-  }, [stopFrameCapture]);
+  }, []);
 
   const startStreaming = async () => {
     setError(null);
@@ -105,9 +59,15 @@ export default function CameraScreen() {
 
     setIsConnecting(true);
     try {
-      addLog('Llamando initializeAsCamera...');
-      await initializeAsCamera();
-      addLog('initializeAsCamera completado');
+      addLog('Obteniendo cámara y micrófono...');
+      const stream = await mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: true,
+      });
+      addLog(`Stream obtenido: ${stream.getVideoTracks().length} video, ${stream.getAudioTracks().length} audio`);
+
+      addLog('Inicializando WebRTC...');
+      await initializeAsCamera(stream);
 
       setIsStreaming(true);
       setIsConnecting(false);
@@ -128,49 +88,27 @@ export default function CameraScreen() {
     }
   };
 
-  if (!cameraPermission || !microphonePermission) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Solicitando permisos...</Text>
-      </View>
-    );
-  }
-
-  if (!cameraPermission.granted || !microphonePermission.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.text}>Se necesita acceso a la cámara y micrófono</Text>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={async () => {
-            await requestCameraPermission();
-            await requestMicrophonePermission();
-          }}
-        >
-          <Text style={styles.buttonText}>Conceder permisos</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={cameraRef}
-        style={styles.camera}
-        facing="back"
-        mode="picture"
-      />
+      {localStream ? (
+        <RTCView
+          streamURL={localStream.toURL()}
+          style={styles.camera}
+          objectFit="cover"
+          zOrder={0}
+        />
+      ) : (
+        <View style={[styles.camera, styles.placeholder]}>
+          <Text style={styles.placeholderIcon}>📷</Text>
+          <Text style={styles.placeholderText}>Cámara no disponible</Text>
+          <Text style={styles.placeholderSubtext}>Presiona "Iniciar Transmisión" para activar</Text>
+        </View>
+      )}
 
       <View style={styles.overlay}>
         <View style={styles.header}>
           <Text style={styles.title}>Cámara Activa</Text>
           <View style={styles.headerRight}>
-            {detectionActive && (
-              <View style={styles.detectionBadge}>
-                <Text style={styles.detectionBadgeText}>🎤</Text>
-              </View>
-            )}
             <View style={[styles.statusDot, {
               backgroundColor: isStreaming ? '#4CAF50' : error ? '#F44336' : '#FF9800'
             }]} />
@@ -183,15 +121,9 @@ export default function CameraScreen() {
           </View>
         ) : null}
 
-        {lastAlert ? (
-          <View style={styles.alertBanner}>
-            <Text style={styles.alertBannerText}>{lastAlert}</Text>
-          </View>
-        ) : null}
-
         <View style={styles.middleArea}>
           <Text style={styles.statusText}>
-            {isStreaming ? 'Transmitiendo...' : isConnecting ? 'Conectando...' : connectionState === 'connected' ? 'Conectado' : 'Esperando conexión...'}
+            {isStreaming ? 'Transmitiendo...' : isConnecting ? 'Conectando...' : 'Esperando conexión...'}
           </Text>
           {connection.localDevice && (
             <Text style={styles.deviceText}>ID: {connection.localDevice.id}</Text>
@@ -224,15 +156,15 @@ export default function CameraScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   camera: { ...StyleSheet.absoluteFillObject },
+  placeholder: { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a2e' },
+  placeholderIcon: { fontSize: 64 },
+  placeholderText: { color: '#FFF', fontSize: 16, marginTop: 16, textAlign: 'center' },
+  placeholderSubtext: { color: '#888', fontSize: 12, marginTop: 8, textAlign: 'center' },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'space-between', padding: 12 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', padding: 12, borderRadius: 10 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   statusDot: { width: 12, height: 12, borderRadius: 6 },
-  detectionBadge: { backgroundColor: 'rgba(76,175,80,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  detectionBadgeText: { fontSize: 12 },
-  alertBanner: { backgroundColor: 'rgba(255,87,34,0.9)', padding: 10, borderRadius: 8 },
-  alertBannerText: { color: '#FFF', fontSize: 13, fontWeight: 'bold', textAlign: 'center' },
   errorBox: { backgroundColor: 'rgba(244,67,54,0.9)', padding: 12, borderRadius: 8 },
   errorText: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
   middleArea: { backgroundColor: 'rgba(0,0,0,0.7)', padding: 12, borderRadius: 10, marginBottom: 8 },
@@ -240,9 +172,6 @@ const styles = StyleSheet.create({
   deviceText: { color: '#AAA', fontSize: 10, marginTop: 2 },
   streamButton: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 8, marginTop: 8, alignItems: 'center' },
   streamButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  text: { color: '#FFF', fontSize: 16, textAlign: 'center' },
-  button: { backgroundColor: '#2196F3', padding: 15, borderRadius: 8, marginTop: 20, alignItems: 'center' },
-  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
   logBox: { backgroundColor: 'rgba(0,0,0,0.7)', padding: 6, borderRadius: 10, maxHeight: 100 },
   logTitle: { color: '#888', fontSize: 10, marginBottom: 4 },
   logScroll: { flex: 1 },

@@ -3,20 +3,27 @@ const SIGNALING_SERVER = `${SIGNALING_PROTOCOL}//${window.location.host}`;
 const DEVICE_ID = `web-monitor-${Date.now()}`;
 let CAMERA_DEVICE_ID = null;
 
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+  iceCandidatePoolSize: 2,
+};
+
 let ws = null;
-let remoteStream = null;
+let pc = null;
+let pendingCandidates = [];
+let remoteDescriptionSet = false;
 let isMuted = false;
 let alerts = [];
 let signalingConnected = false;
-let audioContext = null;
-let analyser = null;
-let audioCheckInterval = null;
-let lastSoundAlert = 0;
-let motionCheckInterval = null;
-let lastMotionAlert = 0;
-let prevFrameData = null;
-let motionCanvas = null;
-let motionCtx = null;
 let keepAliveInterval = null;
 
 const remoteVideo = document.getElementById('remoteVideo');
@@ -68,6 +75,7 @@ function connectSignaling() {
     setStatus('disconnected', 'Desconectado');
     signalingConnected = false;
     CAMERA_DEVICE_ID = null;
+    closePeerConnection();
     if (keepAliveInterval) { clearInterval(keepAliveInterval); keepAliveInterval = null; }
     setTimeout(connectSignaling, 3000);
   };
@@ -93,14 +101,62 @@ function sendSignaling(message) {
   }
 }
 
-let lastFrameTime = 0;
+function closePeerConnection() {
+  if (pc) {
+    try { pc.close(); } catch (e) {}
+    pc = null;
+  }
+  pendingCandidates = [];
+  remoteDescriptionSet = false;
+}
+
+function createPeerConnection() {
+  closePeerConnection();
+  pc = new RTCPeerConnection(ICE_CONFIG);
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendSignaling({
+        type: 'candidate',
+        deviceId: DEVICE_ID,
+        targetDeviceId: CAMERA_DEVICE_ID,
+        payload: event.candidate.toJSON(),
+      });
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log('ICE state:', pc.iceConnectionState);
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      streamStatus.textContent = 'WebRTC conectado - Recibiendo video';
+    } else if (pc.iceConnectionState === 'disconnected') {
+      streamStatus.textContent = 'WebRTC desconectado - Reconectando...';
+    } else if (pc.iceConnectionState === 'failed') {
+      streamStatus.textContent = 'WebRTC fallido';
+      closePeerConnection();
+    }
+  };
+
+  pc.ontrack = (event) => {
+    console.log('Remote track received:', event.track.kind);
+    if (event.streams && event.streams[0]) {
+      remoteVideo.srcObject = event.streams[0];
+      if (!videoOverlay.classList.contains('hidden')) {
+        videoOverlay.classList.add('hidden');
+        streamStatus.textContent = 'Recibiendo transmisión WebRTC';
+      }
+    }
+  };
+
+  return pc;
+}
 
 function handleSignalingMessage(message) {
   switch (message.type) {
     case 'camera-online':
       CAMERA_DEVICE_ID = message.deviceId;
       console.log('Camera is online:', CAMERA_DEVICE_ID);
-      document.getElementById('waitingSubtext').textContent = 'Cámara detectada. Esperando video...';
+      document.getElementById('waitingSubtext').textContent = 'Cámara detectada. Esperando offer WebRTC...';
       document.getElementById('streamStatus').textContent = 'Cámara conectada - Esperando video...';
       break;
 
@@ -109,30 +165,29 @@ function handleSignalingMessage(message) {
       console.log('Camera went offline');
       document.getElementById('waitingSubtext').textContent = 'Cámara desconectada. Esperando reconexión...';
       document.getElementById('streamStatus').textContent = 'Cámara desconectada';
-      if (audioCheckInterval) { clearInterval(audioCheckInterval); audioCheckInterval = null; }
-      if (motionCheckInterval) { clearInterval(motionCheckInterval); motionCheckInterval = null; }
-      if (audioContext) { audioContext.close(); audioContext = null; }
-      prevFrameData = null;
+      closePeerConnection();
+      remoteVideo.srcObject = null;
+      videoOverlay.classList.remove('hidden');
+      break;
+
+    case 'offer':
+      handleOffer(message);
+      break;
+
+    case 'answer':
+      handleAnswer(message);
+      break;
+
+    case 'candidate':
+      handleCandidate(message);
       break;
 
     case 'frame':
       if (message.payload) {
-        lastFrameTime = Date.now();
-        const img = new Image();
-        img.onload = () => {
-          const canvas = remoteVideo.tagName === 'CANVAS' ? remoteVideo : document.getElementById('remoteVideo');
-          if (canvas.tagName === 'CANVAS') {
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          } else {
-            remoteVideo.src = img.src;
-          }
-          if (!videoOverlay.classList.contains('hidden') && CAMERA_DEVICE_ID) {
-            videoOverlay.classList.add('hidden');
-            streamStatus.textContent = 'Recibiendo transmisión';
-          }
-        };
-        img.src = 'data:image/jpeg;base64,' + message.payload;
+        if (!videoOverlay.classList.contains('hidden') && CAMERA_DEVICE_ID) {
+          videoOverlay.classList.add('hidden');
+          streamStatus.textContent = 'Recibiendo transmisión';
+        }
       }
       break;
 
@@ -146,6 +201,84 @@ function handleSignalingMessage(message) {
 
     case 'pong':
       break;
+  }
+}
+
+async function handleOffer(message) {
+  const sdp = message.payload;
+  if (!sdp) return;
+
+  console.log('Received offer from:', message.deviceId);
+  CAMERA_DEVICE_ID = message.deviceId;
+
+  const conn = createPeerConnection();
+
+  try {
+    await conn.setRemoteDescription(new RTCSessionDescription(sdp));
+    remoteDescriptionSet = true;
+
+    for (const c of pendingCandidates) {
+      try {
+        await conn.addIceCandidate(new RTCIceCandidate(c));
+      } catch (e) {
+        console.warn('Failed to add pending ICE candidate:', e);
+      }
+    }
+    pendingCandidates = [];
+
+    const answer = await conn.createAnswer();
+    await conn.setLocalDescription(answer);
+
+    sendSignaling({
+      type: 'answer',
+      deviceId: DEVICE_ID,
+      targetDeviceId: CAMERA_DEVICE_ID,
+      payload: conn.localDescription.toJSON(),
+    });
+
+    console.log('Answer sent to camera');
+    document.getElementById('waitingSubtext').textContent = 'Conexión WebRTC establecida. Esperando video...';
+    document.getElementById('streamStatus').textContent = 'WebRTC conectado - Esperando video...';
+  } catch (err) {
+    console.error('Error handling offer:', err);
+  }
+}
+
+async function handleAnswer(message) {
+  const sdp = message.payload;
+  if (!sdp || !pc) return;
+
+  try {
+    remoteDescriptionSet = false;
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    remoteDescriptionSet = true;
+
+    for (const c of pendingCandidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(c));
+      } catch (e) {
+        console.warn('Failed to add pending ICE candidate:', e);
+      }
+    }
+    pendingCandidates = [];
+  } catch (err) {
+    console.error('Error handling answer:', err);
+  }
+}
+
+async function handleCandidate(message) {
+  const candidate = message.payload;
+  if (!candidate) return;
+
+  if (!remoteDescriptionSet || !pc) {
+    pendingCandidates.push(candidate);
+    return;
+  }
+
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (e) {
+    console.warn('Failed to add ICE candidate:', e);
   }
 }
 
@@ -211,15 +344,12 @@ function renderAlerts() {
 }
 
 function takeScreenshot() {
-  if (!CAMERA_DEVICE_ID) return;
+  if (!remoteVideo.srcObject) return;
   const canvas = document.createElement('canvas');
-  canvas.width = 640;
-  canvas.height = 480;
+  canvas.width = remoteVideo.videoWidth || 640;
+  canvas.height = remoteVideo.videoHeight || 480;
   const ctx = canvas.getContext('2d');
-  const sourceCanvas = document.getElementById('remoteVideo');
-  if (sourceCanvas && sourceCanvas.tagName === 'CANVAS') {
-    ctx.drawImage(sourceCanvas, 0, 0);
-  }
+  ctx.drawImage(remoteVideo, 0, 0, canvas.width, canvas.height);
   const link = document.createElement('a');
   link.download = `baby-monitor-${Date.now()}.png`;
   link.href = canvas.toDataURL('image/png');
@@ -241,6 +371,11 @@ btnConnect.addEventListener('click', () => {
 
 btnMute.addEventListener('click', () => {
   isMuted = !isMuted;
+  if (remoteVideo.srcObject) {
+    remoteVideo.srcObject.getAudioTracks().forEach(track => {
+      track.enabled = !isMuted;
+    });
+  }
   btnMute.classList.toggle('active', isMuted);
   btnMute.querySelector('.btn-label').textContent = isMuted ? 'Unmute' : 'Sonido';
 });
