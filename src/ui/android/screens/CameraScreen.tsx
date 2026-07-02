@@ -3,10 +3,10 @@ import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeM
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import * as KeepAwake from 'expo-keep-awake';
-import { useInitialize } from '../ui/hooks/useInitialize';
-import { useAppStore } from '../infra/store/zustandStore';
-import { WebRTCDetectionAdapter } from '../adapters/detection/WebRTCDetectionAdapter';
-import { WebSocketSignalingAdapter } from '../adapters/signaling/WebSocketSignalingAdapter';
+import { useInitialize } from '../hooks/useInitialize';
+import { useAppStore } from '../../../infra/store/zustandStore';
+import { WebRTCDetectionAdapter } from '../../../adapters/detection/WebRTCDetectionAdapter';
+import { WebSocketSignalingAdapter } from '../../../adapters/signaling/WebSocketSignalingAdapter';
 
 export default function CameraScreen() {
   const { connection } = useAppStore();

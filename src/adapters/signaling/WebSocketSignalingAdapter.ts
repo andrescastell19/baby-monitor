@@ -17,6 +17,7 @@ export class WebSocketSignalingAdapter implements SignalingPort {
   private onReconnectCallback: (() => void) | null = null;
   private reconnectAttempts = 0;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
   connect(deviceId: string, role: string, platform: string): void {
     this.deviceId = deviceId;
@@ -32,6 +33,7 @@ export class WebSocketSignalingAdapter implements SignalingPort {
       this.reconnectAttempts = 0;
       this.onStatusCallback?.('connected');
       this.register();
+      this.startKeepalive();
     };
 
     this.ws.onmessage = (event) => {
@@ -65,6 +67,20 @@ export class WebSocketSignalingAdapter implements SignalingPort {
     } as any);
   }
 
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.keepaliveInterval = setInterval(() => {
+      this.send({ type: 'ping', deviceId: this.deviceId } as any);
+    }, 20000);
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+    }
+  }
+
   private attemptReconnect(): void {
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
@@ -95,6 +111,7 @@ export class WebSocketSignalingAdapter implements SignalingPort {
   }
 
   disconnect(): void {
+    this.stopKeepalive();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }

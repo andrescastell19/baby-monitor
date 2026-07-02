@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAppStore } from '../infra/store/zustandStore';
-import { createDevice } from '../core/domain/Device';
-import { DeviceRole } from '../types';
+import { useAppStore } from '../../../infra/store/zustandStore';
+import { createDevice } from '../../../core/domain/Device';
+import { DeviceRole } from '../../../types';
 
 type RootStackParamList = {
   Pairing: undefined;

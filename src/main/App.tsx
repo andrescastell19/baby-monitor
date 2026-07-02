@@ -3,9 +3,9 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
-import PairingScreen from '../screens/PairingScreen';
-import CameraScreen from '../screens/CameraScreen';
-import MonitorScreen from '../screens/MonitorScreen';
+import PairingScreen from '../ui/android/screens/PairingScreen';
+import CameraScreen from '../ui/android/screens/CameraScreen';
+import MonitorScreen from '../ui/android/screens/MonitorScreen';
 
 type RootStackParamList = {
   Pairing: undefined;

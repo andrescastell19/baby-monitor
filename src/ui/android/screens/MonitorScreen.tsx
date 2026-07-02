@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
-import { useInitialize } from '../ui/hooks/useInitialize';
-import { useAppStore } from '../infra/store/zustandStore';
-import { Alert } from '../core/domain/Alert';
+import { useInitialize } from '../hooks/useInitialize';
+import { useAppStore } from '../../../infra/store/zustandStore';
+import { Alert } from '../../../core/domain/Alert';
 
 export default function MonitorScreen() {
   const { connection, alerts, markAlertAsRead } = useAppStore();
