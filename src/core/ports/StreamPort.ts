@@ -18,6 +18,7 @@ export interface StreamPort {
 
   muteAudio(): void;
   unmuteAudio(): void;
+  sendFrame(base64: string): void;
   getLocalStream(): MediaStream | null;
   getRemoteStream(): MediaStream | null;
   getConnectedMonitors(): string[];

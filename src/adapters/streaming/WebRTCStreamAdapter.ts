@@ -394,6 +394,8 @@ export class WebRTCStreamAdapter implements StreamPort {
     return Array.from(this.peerConnections.keys());
   }
 
+  sendFrame(_base64: string): void {}
+
   getPeerConnection(monitorId: string): any {
     return this.peerConnections.get(monitorId)?.pc || null;
   }

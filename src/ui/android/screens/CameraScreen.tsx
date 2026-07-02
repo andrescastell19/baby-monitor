@@ -1,29 +1,56 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, ScrollView, Platform, NativeModules } from 'react-native';
-import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { useCameraPermissions, useMicrophonePermissions, CameraView } from 'expo-camera';
 import { RTCView } from 'react-native-webrtc';
 import * as KeepAwake from 'expo-keep-awake';
 import { useInitialize } from '../hooks/useInitialize';
 import { useAppStore } from '../../../infra/store/zustandStore';
-import { WebRTCDetectionAdapter } from '../../../adapters/detection/WebRTCDetectionAdapter';
-import { WebSocketSignalingAdapter } from '../../../adapters/signaling/WebSocketSignalingAdapter';
+import { FRAME_CAPTURE_INTERVAL, FRAME_QUALITY } from '../../../core/config/ice';
 
 export default function CameraScreen() {
   const { connection } = useAppStore();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
-  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors } = useInitialize();
+  const { localStream, connectionState, initializeAsCamera, signalingStatus, connectedMonitors, sendFrame } = useInitialize();
   const [isStreaming, setIsStreaming] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [detectionActive, setDetectionActive] = useState(false);
   const [lastAlert, setLastAlert] = useState<string | null>(null);
-  const detectionStarted = useRef(false);
+  const cameraRef = useRef<any>(null);
+  const frameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const addLog = useCallback((msg: string) => {
     const time = new Date().toLocaleTimeString();
     setLogs(prev => [...prev.slice(-15), `${time} ${msg}`]);
+  }, []);
+
+  const startFrameCapture = useCallback(() => {
+    if (frameIntervalRef.current) return;
+    frameIntervalRef.current = setInterval(async () => {
+      if (!cameraRef.current) return;
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          base64: true,
+          quality: FRAME_QUALITY,
+          skipProcessing: true,
+        });
+        if (photo?.base64) {
+          sendFrame(photo.base64);
+        }
+      } catch (err) {
+        // Silently retry
+      }
+    }, FRAME_CAPTURE_INTERVAL);
+    addLog(`Frame capture iniciado (${FRAME_CAPTURE_INTERVAL}ms)`);
+  }, [sendFrame, addLog]);
+
+  const stopFrameCapture = useCallback(() => {
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current);
+      frameIntervalRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -48,26 +75,30 @@ export default function CameraScreen() {
         NativeModules.BabyMonitor.startService();
         addLog('Foreground service iniciado');
       }
+      startFrameCapture();
     } else if (connectionState === 'failed') {
       setIsStreaming(false);
+      stopFrameCapture();
       addLog('WebRTC FALLIDO - intentando reconectar...');
     } else if (connectionState === 'disconnected') {
       setIsStreaming(false);
+      stopFrameCapture();
       addLog('WebRTC DESCONECTADO - reconectando...');
     }
     if (connectionState !== 'new') {
       addLog(`WebRTC state: ${connectionState}`);
     }
-  }, [connectionState, addLog]);
+  }, [connectionState, addLog, startFrameCapture, stopFrameCapture]);
 
   useEffect(() => {
     return () => {
+      stopFrameCapture();
       KeepAwake.deactivateKeepAwake();
       if (Platform.OS === 'android' && NativeModules.BabyMonitor) {
         NativeModules.BabyMonitor.stopService();
       }
     };
-  }, []);
+  }, [stopFrameCapture]);
 
   const startStreaming = async () => {
     setError(null);
@@ -132,14 +163,23 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {localStream ? (
+      <CameraView
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        facing="back"
+        mode="picture"
+      />
+
+      {localStream && (
         <RTCView
           streamURL={localStream.toURL()}
           style={styles.video}
           objectFit="cover"
           mirror={false}
         />
-      ) : (
+      )}
+
+      {!localStream && (
         <View style={styles.cameraPlaceholder}>
           <Text style={styles.placeholderText}>📷</Text>
           <Text style={styles.placeholderLabel}>Cámara inicializando...</Text>

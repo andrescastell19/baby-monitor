@@ -151,6 +151,10 @@ export function useInitialize() {
     webrtcStreamRef.current?.unmuteAudio();
   }, []);
 
+  const sendFrame = useCallback((base64: string) => {
+    relayStreamRef.current?.sendFrame(base64);
+  }, []);
+
   const disconnect = useCallback(() => {
     signalingRef.current?.disconnect();
     webrtcStreamRef.current?.stopSending();
@@ -173,6 +177,7 @@ export function useInitialize() {
     initializeAsMonitor,
     muteAudio,
     unmuteAudio,
+    sendFrame,
     disconnect,
   };
 }
